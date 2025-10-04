@@ -9,45 +9,46 @@ from botocore.exceptions import ClientError
 # Configuration from environment variables
 CLIENT_ID = os.environ.get("CLIENT_ID")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-SECRET_NAME = os.environ.get("TOKEN_CACHE_SECRET", "email-filter-token-cache")
+PARAMETER_NAME = "/email-filter/token-cache"
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-secrets_client = boto3.client("secretsmanager")
+ssm_client = boto3.client("ssm")
 
 
 def get_token_cache():
-    """Retrieve token cache from AWS Secrets Manager"""
+    """Retrieve token cache from SSM Parameter Store"""
     try:
-        response = secrets_client.get_secret_value(SecretId=SECRET_NAME)
-        return response["SecretString"]
+        response = ssm_client.get_parameter(Name=PARAMETER_NAME, WithDecryption=True)
+        return response["Parameter"]["Value"]
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ResourceNotFoundException":
-            # Secret doesn't exist yet, return empty cache
+        if e.response["Error"]["Code"] == "ParameterNotFound":
             return None
         raise
 
 
 def save_token_cache(cache_data):
-    """Save token cache to AWS Secrets Manager"""
+    """Save token cache to SSM Parameter Store"""
     try:
-        secrets_client.update_secret(SecretId=SECRET_NAME, SecretString=cache_data)
+        ssm_client.put_parameter(
+            Name=PARAMETER_NAME, Value=cache_data, Type="SecureString", Overwrite=True
+        )
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ResourceNotFoundException":
-            # Create the secret if it doesn't exist
-            secrets_client.create_secret(
-                Name=SECRET_NAME,
-                SecretString=cache_data,
+        if e.response["Error"]["Code"] == "ParameterNotFound":
+            ssm_client.put_parameter(
+                Name=PARAMETER_NAME,
+                Value=cache_data,
+                Type="SecureString",
                 Description="MSAL token cache for email filter",
             )
 
 
 def authenticate_microsoft():
-    """Authenticate with Microsoft Graph API using cached tokens from Secrets Manager"""
+    """Authenticate with Microsoft Graph API using cached tokens from Parameter Store"""
     cache = msal.SerializableTokenCache()
 
-    # Load existing cache from Secrets Manager
+    # Load existing cache from Parameter Store
     cached_data = get_token_cache()
     if cached_data:
         cache.deserialize(cached_data)
@@ -59,7 +60,7 @@ def authenticate_microsoft():
     # Try to get token silently from cache first
     accounts = app.get_accounts()
     if accounts:
-        print("Using cached credentials from Secrets Manager...")
+        print("Using cached credentials from Parameter Store...")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result and "access_token" in result:
             # Save updated cache if it changed
@@ -71,7 +72,7 @@ def authenticate_microsoft():
     # Lambda can't do device flow interactively!
     raise Exception(
         "No valid cached token found. You need to authenticate locally first "
-        "and upload the token cache to Secrets Manager. See README for setup."
+        "and upload the token cache to Parameter Store. Run setup_token.py again."
     )
 
 
@@ -112,13 +113,10 @@ Example: [0, 2, 5] or [] if nothing should be deleted.
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-5-chat-latest",  # 1M free tokens/day with data sharing
-            messages=[{"role": "user", "content": prompt}],
-            temperature=1,
+            model="gpt-5-mini", messages=[{"role": "user", "content": prompt}]
         )
 
         result = response.choices[0].message.content.strip()
-        # Parse the JSON array
         indices = json.loads(result)
         return indices
     except Exception as e:
@@ -128,7 +126,6 @@ Example: [0, 2, 5] or [] if nothing should be deleted.
 
 def process_junk_mail():
     """Main function to process and clean junk mail"""
-
     # Authenticate
     token = authenticate_microsoft()
     session = requests.Session()
