@@ -18,8 +18,29 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def authenticate_microsoft():
-    """Authenticate with Microsoft Graph API"""
-    app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY)
+    """Authenticate with Microsoft Graph API using cached tokens"""
+    # Create a token cache file
+    cache = msal.SerializableTokenCache()
+    cache_file = "token_cache.bin"
+
+    # Load existing cache if it exists
+    if os.path.exists(cache_file):
+        cache.deserialize(open(cache_file, "r").read())
+
+    app = msal.PublicClientApplication(
+        CLIENT_ID, authority=AUTHORITY, token_cache=cache
+    )
+
+    # Try to get token silently from cache first
+    accounts = app.get_accounts()
+    if accounts:
+        print("Using cached credentials...")
+        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+        if result and "access_token" in result:
+            return result["access_token"]
+
+    # If no cached token, do device flow
+    print("No cached token found, initiating device flow...")
     flow = app.initiate_device_flow(scopes=SCOPES)
 
     if not flow or "user_code" not in flow:
@@ -35,6 +56,11 @@ def authenticate_microsoft():
     if "access_token" not in result:
         print("Auth failed:", result)
         sys.exit(1)
+
+    # Save the cache
+    if cache.has_state_changed:
+        with open(cache_file, "w") as f:
+            f.write(cache.serialize())
 
     return result["access_token"]
 
@@ -53,6 +79,7 @@ def get_deletion_decisions(emails):
 
 DELETE only:
 - Obvious phishing/scams (fake verification, fake cloud storage warnings)
+- Basically ALL casino related stuff
 - Dangerous malware/fraud attempts
 - Clearly fake sender addresses
 
@@ -63,7 +90,7 @@ KEEP things like:
 - Local business marketing (Rendezvous, etc.)
 - Financial service updates (Interactive Brokers)
 - Artist/creator updates
-- Microsoft's lottery promotions (they are real though cringe)
+- Microsoft's reward promotions (they are real though cringe)
 
 Here are the emails (numbered):
 
