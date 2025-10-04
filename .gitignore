@@ -1,6 +1,7 @@
 token_cache.bin
 .aws/
 *.zip
+package/
 
 # Node.js
 node_modules/

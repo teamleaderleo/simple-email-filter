@@ -44,8 +44,8 @@ if (Test-Path lambda-package.zip) {
 New-Item -ItemType Directory -Path package | Out-Null
 
 # Install dependencies
-Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
-pip install -r requirements.txt -t package/ --quiet
+Write-Host "Installing Python dependencies for Linux..." -ForegroundColor Yellow
+pip install -r requirements.txt -t package/ --platform manylinux2014_x86_64 --only-binary=:all: --upgrade --quiet
 
 # Copy lambda function
 Copy-Item lambda_function.py package/
