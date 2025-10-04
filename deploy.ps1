@@ -3,6 +3,9 @@
 
 $ErrorActionPreference = "Stop"
 
+# Disable AWS CLI pager
+$env:AWS_PAGER = ""
+
 $FunctionName = "email-junk-filter"
 $Runtime = "python3.11"
 $Handler = "lambda_function.lambda_handler"
