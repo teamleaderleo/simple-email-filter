@@ -1,5 +1,5 @@
 """
-Run this script ONCE locally to authenticate and upload token to AWS Secrets Manager
+Run this script ONCE locally to authenticate and upload token to AWS SSM Parameter Store
 """
 
 import msal
@@ -12,12 +12,12 @@ load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
-SECRET_NAME = "email-filter-token-cache"
-AWS_REGION = "us-east-1"
+PARAMETER_NAME = "/email-filter/token-cache"
+AWS_REGION = "us-east-1"  # Change to your preferred region
 
 
 def authenticate_and_upload():
-    """Authenticate locally and upload token cache to AWS Secrets Manager"""
+    """Authenticate locally and upload token cache to AWS SSM Parameter Store"""
 
     # Create MSAL app with cache
     cache = msal.SerializableTokenCache()
@@ -47,24 +47,25 @@ def authenticate_and_upload():
 
     print("\n✓ Authentication successful!")
 
-    # Upload to AWS Secrets Manager
-    print(f"\nUploading token cache to AWS Secrets Manager ({SECRET_NAME})...")
+    # Upload to AWS SSM Parameter Store
+    print(f"\nUploading token cache to AWS Parameter Store ({PARAMETER_NAME})...")
 
-    secrets_client = boto3.client("secretsmanager", region_name=AWS_REGION)
+    ssm_client = boto3.client("ssm", region_name=AWS_REGION)
     cache_data = cache.serialize()
 
     try:
-        # Try to create the secret
-        secrets_client.create_secret(
-            Name=SECRET_NAME,
-            SecretString=cache_data,
+        # Try to create/update the parameter
+        ssm_client.put_parameter(
+            Name=PARAMETER_NAME,
+            Value=cache_data,
+            Type="SecureString",
             Description="MSAL token cache for email filter Lambda",
+            Overwrite=True,
         )
-        print(f"✓ Secret created successfully in {AWS_REGION}")
-    except secrets_client.exceptions.ResourceExistsException:
-        # Secret already exists, update it
-        secrets_client.update_secret(SecretId=SECRET_NAME, SecretString=cache_data)
-        print(f"✓ Secret updated successfully in {AWS_REGION}")
+        print(f"✓ Parameter updated successfully in {AWS_REGION}")
+    except Exception as e:
+        print(f"Error: {e}")
+        return
 
     print("\n" + "=" * 60)
     print("Setup complete! Your Lambda function can now authenticate.")
@@ -72,7 +73,7 @@ def authenticate_and_upload():
 
 
 if __name__ == "__main__":
-    print("AWS Secrets Manager Setup for Lambda Email Filter")
+    print("AWS Parameter Store Setup for Lambda Email Filter")
     print("=" * 60)
 
     # Check AWS credentials
