@@ -102,7 +102,7 @@ Example: [0, 2, 5] or [] if nothing should be deleted.
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-5-mini",  # 10M free tokens/day with data sharing
+            model="gpt-5-chat-latest",  # 1M free tokens/day with data sharing
             messages=[{"role": "user", "content": prompt}],
             temperature=1,
         )
