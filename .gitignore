@@ -1,6 +1,7 @@
 token_cache.bin
- .aws/
- 
+.aws/
+*.zip
+
 # Node.js
 node_modules/
 npm-debug.log*
