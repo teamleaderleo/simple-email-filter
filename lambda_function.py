@@ -107,7 +107,8 @@ Example: [0, 2, 5] or [] if nothing should be deleted.
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-5-mini", messages=[{"role": "user", "content": prompt}]
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}]
         )
 
         result = response.choices[0].message.content.strip()
@@ -132,11 +133,7 @@ def process_junk_mail():
         .get("value", [])
     )
     junk = next(
-        (
-            f
-            for f in folders
-            if f.get("displayName", "").lower() in ("junk email", "junk")
-        ),
+        (f for f in folders if f.get("displayName", "").lower() in ("junk email", "junk")),
         None,
     )
     if not junk:
@@ -145,7 +142,7 @@ def process_junk_mail():
 
     junk_id = junk["id"]
 
-    # Get recent junk messages
+    # Fetch 20 most recent emails
     msgs = (
         session.get(
             f"https://graph.microsoft.com/v1.0/me/mailFolders/{junk_id}/messages",
@@ -161,33 +158,61 @@ def process_junk_mail():
 
     print(f"Found {len(msgs)} junk emails")
 
-    # Prepare email data
+    # Prepare email data and collect IDs
     emails = []
-    for i, m in enumerate(msgs):
-        emails.append(
-            {
-                "id": m.get("id"),
-                "subject": m.get("subject", ""),
-                "sender": (m.get("from") or {})
-                .get("emailAddress", {})
-                .get("address", ""),
-                "preview": m.get("bodyPreview", ""),
-                "received": m.get("receivedDateTime", ""),
-            }
-        )
+    current_ids = set()
+    for m in msgs:
+        email_id = m.get('id')
+        current_ids.add(email_id)
+        emails.append({
+            "id": email_id,
+            "subject": m.get("subject", ""),
+            "sender": (m.get("from") or {}).get("emailAddress", {}).get("address", ""),
+            "preview": m.get("bodyPreview", ""),
+            "received": m.get("receivedDateTime", "")
+        })
+
+    # Load cache of previously seen email IDs
+    previous_ids = set()
+    try:
+        cache_response = table.get_item(Key={'id': 'seen-emails'})
+        if 'Item' in cache_response:
+            previous_ids = set(cache_response['Item'].get('email_ids', []))
+    except Exception as e:
+        print(f"Cache check failed: {e}")
+
+    # Find NEW emails only
+    new_ids = current_ids - previous_ids
+    
+    if not new_ids:
+        print("No new emails since last run - skipping AI classification")
+        return {"statusCode": 200, "body": json.dumps({
+            "message": "No new emails to process",
+            "deleted": 0,
+            "kept": len(emails)
+        })}
+
+    print(f"Found {len(new_ids)} new emails")
+
+    # Filter to only new emails, keep them in order
+    new_emails = [email for email in emails if email['id'] in new_ids]
+    
+    # Send up to 10 newest to OpenAI
+    emails_to_classify = new_emails[:10]
+    print(f"Classifying {len(emails_to_classify)} new emails with OpenAI")
 
     # Get AI decision
-    indices_to_delete = get_deletion_decisions(emails)
+    indices_to_delete = get_deletion_decisions(emails_to_classify)
     print(f"OpenAI recommends deleting indices: {indices_to_delete}")
 
     # Process deletions
     deleted_count = 0
     for idx in indices_to_delete:
-        if idx < 0 or idx >= len(emails):
+        if idx < 0 or idx >= len(emails_to_classify):
             print(f"Invalid index {idx}, skipping")
             continue
 
-        email = emails[idx]
+        email = emails_to_classify[idx]
         print(f"DELETING [{idx}]: {email['sender']} - {email['subject']}")
 
         # Actually delete via Graph API
@@ -200,15 +225,27 @@ def process_junk_mail():
         else:
             print(f"  Failed to delete: HTTP {response.status_code}")
 
-    kept_count = len(emails) - deleted_count
-    summary = f"Summary: {deleted_count} deleted, {kept_count} kept"
-    print(summary)
+    # Update cache with ALL current email IDs (not just processed ones)
+    try:
+        table.put_item(Item={
+            'id': 'seen-emails',
+            'email_ids': list(current_ids)
+        })
+    except Exception as e:
+        print(f"Cache update failed: {e}")
 
+    kept_count = len(emails_to_classify) - deleted_count
+    summary = f"Summary: {deleted_count} deleted, {kept_count} kept ({len(emails) - len(new_ids)} already seen)"
+    print(summary)
+    
     return {
         "statusCode": 200,
-        "body": json.dumps(
-            {"message": summary, "deleted": deleted_count, "kept": kept_count}
-        ),
+        "body": json.dumps({
+            "message": summary,
+            "deleted": deleted_count,
+            "kept": kept_count,
+            "already_seen": len(emails) - len(new_ids)
+        })
     }
 
 
@@ -218,4 +255,7 @@ def lambda_handler(event, context):
         return process_junk_mail()
     except Exception as e:
         print(f"Error: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
