@@ -59,6 +59,25 @@ Write-Host "✓ Package created (lambda-package.zip)" -ForegroundColor Green
 # Get AWS account ID
 $AccountId = (aws sts get-caller-identity --query Account --output text)
 
+# Create DynamoDB table if it doesn't exist
+Write-Host "Checking DynamoDB table..." -ForegroundColor Yellow
+$TableName = "email-filter-tokens"
+
+aws dynamodb describe-table --table-name $TableName --region $Region 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {
+  Write-Host "✓ DynamoDB table already exists" -ForegroundColor Green
+}
+else {
+  Write-Host "Creating DynamoDB table..." -ForegroundColor Yellow
+  aws dynamodb create-table `
+    --table-name $TableName `
+    --attribute-definitions AttributeName=id, AttributeType=S `
+    --key-schema AttributeName=id, KeyType=HASH `
+    --billing-mode PAY_PER_REQUEST `
+    --region $Region | Out-Null
+  Write-Host "✓ DynamoDB table created (Free tier - 25GB storage)" -ForegroundColor Green
+}
+
 # Check if IAM role exists
 Write-Host "Checking IAM role..." -ForegroundColor Yellow
 aws iam get-role --role-name $RoleName 2>$null | Out-Null

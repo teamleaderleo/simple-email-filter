@@ -9,46 +9,40 @@ from botocore.exceptions import ClientError
 # Configuration from environment variables
 CLIENT_ID = os.environ.get("CLIENT_ID")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-PARAMETER_NAME = "/email-filter/token-cache"
+TABLE_NAME = "email-filter-tokens"
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-ssm_client = boto3.client("ssm")
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(TABLE_NAME)
 
 
 def get_token_cache():
-    """Retrieve token cache from SSM Parameter Store"""
+    """Retrieve token cache from DynamoDB"""
     try:
-        response = ssm_client.get_parameter(Name=PARAMETER_NAME, WithDecryption=True)
-        return response["Parameter"]["Value"]
+        response = table.get_item(Key={"id": "token"})
+        if "Item" in response:
+            return response["Item"].get("cache")
+        return None
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ParameterNotFound":
-            return None
-        raise
+        print(f"Error reading from DynamoDB: {e}")
+        return None
 
 
 def save_token_cache(cache_data):
-    """Save token cache to SSM Parameter Store"""
+    """Save token cache to DynamoDB"""
     try:
-        ssm_client.put_parameter(
-            Name=PARAMETER_NAME, Value=cache_data, Type="SecureString", Overwrite=True
-        )
+        table.put_item(Item={"id": "token", "cache": cache_data})
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ParameterNotFound":
-            ssm_client.put_parameter(
-                Name=PARAMETER_NAME,
-                Value=cache_data,
-                Type="SecureString",
-                Description="MSAL token cache for email filter",
-            )
+        print(f"Error writing to DynamoDB: {e}")
 
 
 def authenticate_microsoft():
-    """Authenticate with Microsoft Graph API using cached tokens from Parameter Store"""
+    """Authenticate with Microsoft Graph API using cached tokens from DynamoDB"""
     cache = msal.SerializableTokenCache()
 
-    # Load existing cache from Parameter Store
+    # Load existing cache from DynamoDB
     cached_data = get_token_cache()
     if cached_data:
         cache.deserialize(cached_data)
@@ -60,7 +54,7 @@ def authenticate_microsoft():
     # Try to get token silently from cache first
     accounts = app.get_accounts()
     if accounts:
-        print("Using cached credentials from Parameter Store...")
+        print("Using cached credentials from DynamoDB...")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result and "access_token" in result:
             # Save updated cache if it changed
@@ -72,7 +66,7 @@ def authenticate_microsoft():
     # Lambda can't do device flow interactively!
     raise Exception(
         "No valid cached token found. You need to authenticate locally first "
-        "and upload the token cache to Parameter Store. Run setup_token.py again."
+        "and upload the token cache to DynamoDB. Run setup_token.py again."
     )
 
 

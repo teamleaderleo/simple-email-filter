@@ -1,5 +1,5 @@
 """
-Run this script ONCE locally to authenticate and upload token to AWS SSM Parameter Store
+Run this script ONCE locally to authenticate and upload token to DynamoDB
 """
 
 import msal
@@ -12,12 +12,12 @@ load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
-PARAMETER_NAME = "/email-filter/token-cache"
+TABLE_NAME = "email-filter-tokens"
 AWS_REGION = "us-east-1"  # Change to your preferred region
 
 
 def authenticate_and_upload():
-    """Authenticate locally and upload token cache to AWS SSM Parameter Store"""
+    """Authenticate locally and upload token cache to DynamoDB"""
 
     # Create MSAL app with cache
     cache = msal.SerializableTokenCache()
@@ -47,24 +47,17 @@ def authenticate_and_upload():
 
     print("\n✓ Authentication successful!")
 
-    # Upload to AWS SSM Parameter Store
-    print(f"\nUploading token cache to AWS Parameter Store ({PARAMETER_NAME})...")
+    # Upload to DynamoDB
+    print(f"\nUploading token cache to DynamoDB ({TABLE_NAME})...")
 
-    ssm_client = boto3.client("ssm", region_name=AWS_REGION)
+    dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+    table = dynamodb.Table(TABLE_NAME)
     cache_data = cache.serialize()
 
     try:
-        # Try to create/update the parameter (advanced tier for larger size)
-        ssm_client.put_parameter(
-            Name=PARAMETER_NAME,
-            Value=cache_data,
-            Type="SecureString",
-            Description="MSAL token cache for email filter Lambda",
-            Tier="Advanced",  # Supports up to 8KB instead of 4KB
-            Overwrite=True,
-        )
-        print(f"✓ Parameter updated successfully in {AWS_REGION}")
-        print("Note: Using Advanced tier ($0.05/month - cheaper than Secrets Manager)")
+        table.put_item(Item={"id": "token", "cache": cache_data})
+        print(f"✓ Token cache saved successfully in {AWS_REGION}")
+        print("Note: Using DynamoDB Free Tier (25GB storage - completely free)")
     except Exception as e:
         print(f"Error: {e}")
         return
@@ -75,7 +68,7 @@ def authenticate_and_upload():
 
 
 if __name__ == "__main__":
-    print("AWS Parameter Store Setup for Lambda Email Filter")
+    print("DynamoDB Setup for Lambda Email Filter")
     print("=" * 60)
 
     # Check AWS credentials
