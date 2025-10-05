@@ -1,4 +1,4 @@
-# Automated Junk Mail Filter for Outlook
+# Simple Automated Junk Mail Filter for Outlook
 
 Outlook inbox rules don't affect Junk, so I had to make this!!!
 
