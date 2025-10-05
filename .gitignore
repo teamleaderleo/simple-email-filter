@@ -2,7 +2,7 @@ token_cache.bin
 .aws/
 *.zip
 package/
-
+note_to_self.txt
 output.json
 
 # Node.js
