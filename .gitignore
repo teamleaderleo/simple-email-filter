@@ -3,6 +3,8 @@ token_cache.bin
 *.zip
 package/
 
+output.json
+
 # Node.js
 node_modules/
 npm-debug.log*
