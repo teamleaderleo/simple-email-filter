@@ -54,15 +54,17 @@ def authenticate_and_upload():
     cache_data = cache.serialize()
 
     try:
-        # Try to create/update the parameter
+        # Try to create/update the parameter (advanced tier for larger size)
         ssm_client.put_parameter(
             Name=PARAMETER_NAME,
             Value=cache_data,
             Type="SecureString",
             Description="MSAL token cache for email filter Lambda",
+            Tier="Advanced",  # Supports up to 8KB instead of 4KB
             Overwrite=True,
         )
         print(f"✓ Parameter updated successfully in {AWS_REGION}")
+        print("Note: Using Advanced tier ($0.05/month - cheaper than Secrets Manager)")
     except Exception as e:
         print(f"Error: {e}")
         return
