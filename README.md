@@ -15,9 +15,9 @@ AI-powered email filtering for Microsoft Outlook/Hotmail that runs in AWS Lambda
 ## Cost
 
 - **Lambda**: Free (well under 1M requests/month)
-- **AWS Parameter Store**: $0.05/month (Advanced tier)
+- **DynamoDB**: Free (25GB storage in free tier)
 - **OpenAI API**: Free (with data sharing enabled, 10M tokens/day)
-- **Total**: $0.05/month
+- **Total**: $0/month
 
 ## Prerequisites
 
@@ -84,7 +84,7 @@ aws configure
 python setup_token.py
 ```
 
-Follow the device code prompt to authenticate. This uploads your token cache to AWS Parameter Store.
+Follow the device code prompt to authenticate. This uploads your token cache to AWS DynamoDB.
 
 ### 6. Deploy to Lambda
 
@@ -179,11 +179,11 @@ aws events delete-rule --name email-filter-schedule --region us-east-1
 # Delete Lambda function
 aws lambda delete-function --function-name email-junk-filter --region us-east-1
 
-# Delete token cache
-aws ssm delete-parameter --name /email-filter/token-cache --region us-east-1
+# Delete DynamoDB table
+aws dynamodb delete-table --table-name email-filter-tokens --region us-east-1
 
 # Delete IAM role
-aws iam delete-role-policy --role-name email-filter-lambda-role --policy-name SSMParameterStoreAccess
+aws iam delete-role-policy --role-name email-filter-lambda-role --policy-name DynamoDBAccess
 aws iam detach-role-policy --role-name email-filter-lambda-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 aws iam delete-role --role-name email-filter-lambda-role
 ```
@@ -191,12 +191,12 @@ aws iam delete-role --role-name email-filter-lambda-role
 ## How It Works
 
 1. EventBridge triggers Lambda function every 15 minutes
-2. Lambda retrieves cached auth token from Parameter Store
+2. Lambda retrieves cached auth token from DynamoDB
 3. Authenticates with Microsoft Graph API
 4. Fetches recent emails from junk folder
 5. Sends email list to GPT-5-mini for classification
 6. Deletes only the most heinous spam
-7. Updates token cache if refreshed
+7. Updates token cache in DynamoDB if refreshed
 
 ## Customizing Deletion Criteria
 
