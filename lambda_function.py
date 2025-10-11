@@ -87,6 +87,8 @@ DELETE only:
 - Basically ALL casino related stuff
 - Dangerous malware/fraud attempts
 - Clearly fake sender addresses
+- "Free car repair kit" type giveaways (it's not really CAA!)
+- "Free Yeti Tumbler" type giveaways (not really Tim Hortons!)
 
 KEEP things like:
 - Legitimate service notifications (AWS, Google, etc.)
