@@ -6,7 +6,7 @@ AI-powered email filtering for Microsoft Outlook/Hotmail that runs in AWS Lambda
 
 ## Note:
 
-The setup instructions aren't as granular/accurate as I'd like; if you are having trouble replicating this and LLMs aren't helping enough, I can rewrite this for you. 
+The setup instructions aren't as granular as I'd like; if you are having trouble replicating this and LLMs aren't helping enough, I can rewrite this for you. 
 
 Just add an issue in https://github.com/teamleaderleo/simple-email-filter/issues and I'll get around to it.
 
