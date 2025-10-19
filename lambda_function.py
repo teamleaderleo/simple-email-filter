@@ -90,6 +90,7 @@ DELETE only:
 - "Free car repair kit" type giveaways (it's not really CAA!)
 - "Free Yeti Tumbler" type giveaways (not really Tim Hortons!)
 - Stuff like "You’ve got $1,538 — why wait to spend it? Re: MtOWzw"
+- Stuff like "Congrats! You've Scored $50 Off + FREE Gift."
 
 KEEP things like:
 - Legitimate service notifications (AWS, Google, etc.)
