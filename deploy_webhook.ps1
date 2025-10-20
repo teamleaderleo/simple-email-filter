@@ -202,7 +202,8 @@ Write-Host ""
 Write-Host "Setting up API Gateway..." -ForegroundColor Yellow
 
 # Check if API exists
-$apiId = (aws apigateway get-rest-apis --region $REGION --query "items[?name=='email-webhook-api'].id" --output text).Trim()
+$apiIdRaw = aws apigateway get-rest-apis --region $REGION --query "items[?name=='email-webhook-api'].id" --output text
+$apiId = if ($apiIdRaw) { $apiIdRaw.Trim() } else { $null }
 
 if ([string]::IsNullOrWhiteSpace($apiId)) {
   Write-Host "Creating new API Gateway..." -ForegroundColor Yellow
