@@ -14,7 +14,10 @@ AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-dynamodb = boto3.resource("dynamodb")
+# Use Lambda's region (automatically set by AWS)
+dynamodb = boto3.resource(
+    "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-2")
+)
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -235,11 +238,11 @@ def lambda_handler(event, context):
 
     # Handle validation request from Microsoft
     # When you first create a subscription, Microsoft sends a validation token
-    query_params = event.get("queryStringParameters") or {}
-    validation_token = query_params.get("validationToken")
+    query_params = event.get("queryStringParameters")
 
-    if validation_token:
-        print(f"Validation request received, returning token")
+    if query_params and "validationToken" in query_params:
+        validation_token = query_params["validationToken"]
+        print(f"Validation request received, returning token: {validation_token}")
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "text/plain"},
