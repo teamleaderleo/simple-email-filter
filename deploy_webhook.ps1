@@ -42,12 +42,19 @@ function Compress-FastZip {
     if (Test-Path $DestinationPath) {
       Remove-Item $DestinationPath -Force
     }
-    & $7zipExe a -tzip $DestinationPath "$SourcePath\*" -mx1 | Out-Null
+    # Change to source directory and zip from there to get correct structure
+    Push-Location $SourcePath
+    & $7zipExe a -tzip (Join-Path $PSScriptRoot $DestinationPath) * -mx1 | Out-Null
+    Pop-Location
   }
   else {
     Write-Host "7-Zip not found, using Compress-Archive (slow, ~1 minute)..." -ForegroundColor Yellow
     Write-Host "Tip: Install 7-Zip from https://www.7-zip.org/ for 10x faster builds!" -ForegroundColor Cyan
-    Compress-Archive -Path "$SourcePath\*" -DestinationPath $DestinationPath -Force
+    # Compress-Archive needs the full path
+    $fullDestPath = Join-Path $PSScriptRoot $DestinationPath
+    Push-Location $SourcePath
+    Compress-Archive -Path * -DestinationPath $fullDestPath -Force
+    Pop-Location
   }
 }
 

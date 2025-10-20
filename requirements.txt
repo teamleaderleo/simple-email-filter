@@ -1,4 +1,3 @@
 msal
 requests
 openai
-boto3
