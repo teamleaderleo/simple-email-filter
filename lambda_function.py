@@ -91,6 +91,8 @@ DELETE only:
 - "Free Yeti Tumbler" type giveaways (not really Tim Hortons!)
 - Stuff like "You’ve got $1,538 — why wait to spend it? Re: MtOWzw"
 - Stuff like "Congrats! You've Scored $50 Off + FREE Gift."
+- "use the code FORTUNE1 for an amazing"
+- Anything with the money eyes emoji
 
 KEEP things like:
 - Legitimate service notifications (AWS, Google, etc.)
