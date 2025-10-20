@@ -149,36 +149,24 @@ $roleArn = "arn:aws:iam::$($accountId):role/$roleName"
 Write-Host ""
 Write-Host "Packaging webhook handler Lambda..." -ForegroundColor Yellow
 
-# Check if we need to repackage
-$needsRepackage = $true
-if (Test-Path "webhook-lambda.zip") {
-  $zipTime = (Get-Item "webhook-lambda.zip").LastWriteTime
-  $pyTime = (Get-Item "webhook_handler.py").LastWriteTime
-  if ($zipTime -gt $pyTime) {
-    Write-Host "✅ Using existing webhook-lambda.zip (up to date)" -ForegroundColor Green
-    $needsRepackage = $false
-  }
+if (-not (Test-Path "webhook-package")) {
+  New-Item -ItemType Directory -Path "webhook-package" | Out-Null
 }
 
-if ($needsRepackage) {
-  if (-not (Test-Path "webhook-package")) {
-    New-Item -ItemType Directory -Path "webhook-package" | Out-Null
-  }
+Copy-Item webhook_handler.py webhook-package/lambda_function.py -Force
 
-  Copy-Item webhook_handler.py webhook-package/lambda_function.py -Force
-
-  # Copy existing package dependencies
-  if (Test-Path "package") {
-    Copy-Item -Recurse package/* webhook-package/ -Force
-  }
-  else {
-    Write-Host "❌ No package directory found. Run the original deploy script first to install dependencies."
-    exit 1
-  }
-
-  Compress-FastZip -SourcePath "webhook-package" -DestinationPath "webhook-lambda.zip"
-  Write-Host "✅ Webhook handler packaged" -ForegroundColor Green
+# Copy existing package dependencies
+if (Test-Path "package") {
+  Copy-Item -Recurse package/* webhook-package/ -Force
 }
+else {
+  Write-Host "❌ No package directory found. Run the original deploy script first to install dependencies."
+  exit 1
+}
+
+# Always rebuild zip (no caching)
+Compress-FastZip -SourcePath "webhook-package" -DestinationPath "webhook-lambda.zip"
+Write-Host "✅ Webhook handler packaged" -ForegroundColor Green
 
 # Deploy webhook handler Lambda
 Write-Host ""
@@ -243,28 +231,16 @@ Write-Host "🌐 Webhook URL: $webhookUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Packaging subscription manager Lambda..." -ForegroundColor Yellow
 
-# Check if we need to repackage
-$needsRepackage = $true
-if (Test-Path "subscription-lambda.zip") {
-  $zipTime = (Get-Item "subscription-lambda.zip").LastWriteTime
-  $pyTime = (Get-Item "subscription_manager.py").LastWriteTime
-  if ($zipTime -gt $pyTime) {
-    Write-Host "✅ Using existing subscription-lambda.zip (up to date)" -ForegroundColor Green
-    $needsRepackage = $false
-  }
+if (-not (Test-Path "subscription-package")) {
+  New-Item -ItemType Directory -Path "subscription-package" | Out-Null
 }
 
-if ($needsRepackage) {
-  if (-not (Test-Path "subscription-package")) {
-    New-Item -ItemType Directory -Path "subscription-package" | Out-Null
-  }
+Copy-Item subscription_manager.py subscription-package/lambda_function.py -Force
+Copy-Item -Recurse package/* subscription-package/ -Force
 
-  Copy-Item subscription_manager.py subscription-package/lambda_function.py -Force
-  Copy-Item -Recurse package/* subscription-package/ -Force
-
-  Compress-FastZip -SourcePath "subscription-package" -DestinationPath "subscription-lambda.zip"
-  Write-Host "✅ Subscription manager packaged" -ForegroundColor Green
-}
+# Always rebuild zip (no caching)
+Compress-FastZip -SourcePath "subscription-package" -DestinationPath "subscription-lambda.zip"
+Write-Host "✅ Subscription manager packaged" -ForegroundColor Green
 
 # Deploy subscription manager Lambda
 Write-Host ""
