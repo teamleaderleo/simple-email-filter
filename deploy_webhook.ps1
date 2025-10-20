@@ -7,6 +7,50 @@
 
 $ErrorActionPreference = "Stop"
 
+# Function to compress using 7zip (much faster) or fallback to Compress-Archive
+function Compress-FastZip {
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath
+  )
+    
+  # Try to find 7zip
+  $7zipPaths = @(
+    "C:\Program Files\7-Zip\7z.exe",
+    "C:\Program Files (x86)\7-Zip\7z.exe"
+  )
+    
+  $7zipExe = $null
+  foreach ($path in $7zipPaths) {
+    if (Test-Path $path) {
+      $7zipExe = $path
+      break
+    }
+  }
+    
+  # Also check if 7z is in PATH
+  if (-not $7zipExe) {
+    try {
+      $7zipExe = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+    }
+    catch {}
+  }
+    
+  if ($7zipExe) {
+    Write-Host "Using 7-Zip (fast compression)..." -ForegroundColor Yellow
+    # Delete existing zip if it exists
+    if (Test-Path $DestinationPath) {
+      Remove-Item $DestinationPath -Force
+    }
+    & $7zipExe a -tzip $DestinationPath "$SourcePath\*" -mx1 | Out-Null
+  }
+  else {
+    Write-Host "7-Zip not found, using Compress-Archive (slow, ~1 minute)..." -ForegroundColor Yellow
+    Write-Host "Tip: Install 7-Zip from https://www.7-zip.org/ for 10x faster builds!" -ForegroundColor Cyan
+    Compress-Archive -Path "$SourcePath\*" -DestinationPath $DestinationPath -Force
+  }
+}
+
 # Load environment variables
 if (Test-Path .env) {
   Get-Content .env | ForEach-Object {
@@ -125,8 +169,7 @@ if ($needsRepackage) {
     exit 1
   }
 
-  Write-Host "Compressing (~30MB, this takes a minute)..." -ForegroundColor Yellow
-  Compress-Archive -Path webhook-package\* -DestinationPath webhook-lambda.zip -Force
+  Compress-FastZip -SourcePath "webhook-package" -DestinationPath "webhook-lambda.zip"
   Write-Host "✅ Webhook handler packaged" -ForegroundColor Green
 }
 
@@ -211,8 +254,7 @@ if ($needsRepackage) {
   Copy-Item subscription_manager.py subscription-package/lambda_function.py -Force
   Copy-Item -Recurse package/* subscription-package/ -Force
 
-  Write-Host "Compressing (~30MB, this takes a minute)..." -ForegroundColor Yellow
-  Compress-Archive -Path subscription-package\* -DestinationPath subscription-lambda.zip -Force
+  Compress-FastZip -SourcePath "subscription-package" -DestinationPath "subscription-lambda.zip"
   Write-Host "✅ Subscription manager packaged" -ForegroundColor Green
 }
 
@@ -247,13 +289,12 @@ aws lambda add-permission --function-name email-subscription-manager --statement
 
 Write-Host "✅ EventBridge rule created (runs every 2 days)" -ForegroundColor Green
 
-# Clean up temporary files
-Remove-Item webhook-lambda.zip -ErrorAction SilentlyContinue
-Remove-Item subscription-lambda.zip -ErrorAction SilentlyContinue
+# Clean up temporary files (keep zips for faster rebuilds)
 Remove-Item trust-policy.json -ErrorAction SilentlyContinue
 Remove-Item dynamo-policy.json -ErrorAction SilentlyContinue
 Remove-Item -Recurse webhook-package -ErrorAction SilentlyContinue
 Remove-Item -Recurse subscription-package -ErrorAction SilentlyContinue
+Write-Host "Keeping zip files for faster rebuilds (webhook-lambda.zip, subscription-lambda.zip)" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "=== Deployment Complete! ===" -ForegroundColor Green
