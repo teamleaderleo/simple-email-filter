@@ -3,7 +3,9 @@ token_cache.bin
 *.zip
 package/
 note_to_self.txt
-output.json
+output.json'
+webhook-package/
+subscription-package/
 
 # Node.js
 node_modules/
