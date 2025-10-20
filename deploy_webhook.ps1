@@ -98,23 +98,37 @@ $roleArn = "arn:aws:iam::$($accountId):role/$roleName"
 Write-Host ""
 Write-Host "Packaging webhook handler Lambda..." -ForegroundColor Yellow
 
-if (-not (Test-Path "webhook-package")) {
-  New-Item -ItemType Directory -Path "webhook-package" | Out-Null
+# Check if we need to repackage
+$needsRepackage = $true
+if (Test-Path "webhook-lambda.zip") {
+  $zipTime = (Get-Item "webhook-lambda.zip").LastWriteTime
+  $pyTime = (Get-Item "webhook_handler.py").LastWriteTime
+  if ($zipTime -gt $pyTime) {
+    Write-Host "✅ Using existing webhook-lambda.zip (up to date)" -ForegroundColor Green
+    $needsRepackage = $false
+  }
 }
 
-Copy-Item webhook_handler.py webhook-package/lambda_function.py -Force
+if ($needsRepackage) {
+  if (-not (Test-Path "webhook-package")) {
+    New-Item -ItemType Directory -Path "webhook-package" | Out-Null
+  }
 
-# Copy existing package dependencies
-if (Test-Path "package") {
-  Copy-Item -Recurse package/* webhook-package/ -Force
-}
-else {
-  Write-Host "❌ No package directory found. Run the original deploy script first to install dependencies."
-  exit 1
-}
+  Copy-Item webhook_handler.py webhook-package/lambda_function.py -Force
 
-Compress-Archive -Path webhook-package\* -DestinationPath webhook-lambda.zip -Force
-Write-Host "✅ Webhook handler packaged" -ForegroundColor Green
+  # Copy existing package dependencies
+  if (Test-Path "package") {
+    Copy-Item -Recurse package/* webhook-package/ -Force
+  }
+  else {
+    Write-Host "❌ No package directory found. Run the original deploy script first to install dependencies."
+    exit 1
+  }
+
+  Write-Host "Compressing (~30MB, this takes a minute)..." -ForegroundColor Yellow
+  Compress-Archive -Path webhook-package\* -DestinationPath webhook-lambda.zip -Force
+  Write-Host "✅ Webhook handler packaged" -ForegroundColor Green
+}
 
 # Deploy webhook handler Lambda
 Write-Host ""
@@ -178,15 +192,29 @@ Write-Host "🌐 Webhook URL: $webhookUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Packaging subscription manager Lambda..." -ForegroundColor Yellow
 
-if (-not (Test-Path "subscription-package")) {
-  New-Item -ItemType Directory -Path "subscription-package" | Out-Null
+# Check if we need to repackage
+$needsRepackage = $true
+if (Test-Path "subscription-lambda.zip") {
+  $zipTime = (Get-Item "subscription-lambda.zip").LastWriteTime
+  $pyTime = (Get-Item "subscription_manager.py").LastWriteTime
+  if ($zipTime -gt $pyTime) {
+    Write-Host "✅ Using existing subscription-lambda.zip (up to date)" -ForegroundColor Green
+    $needsRepackage = $false
+  }
 }
 
-Copy-Item subscription_manager.py subscription-package/lambda_function.py -Force
-Copy-Item -Recurse package/* subscription-package/ -Force
+if ($needsRepackage) {
+  if (-not (Test-Path "subscription-package")) {
+    New-Item -ItemType Directory -Path "subscription-package" | Out-Null
+  }
 
-Compress-Archive -Path subscription-package\* -DestinationPath subscription-lambda.zip -Force
-Write-Host "✅ Subscription manager packaged" -ForegroundColor Green
+  Copy-Item subscription_manager.py subscription-package/lambda_function.py -Force
+  Copy-Item -Recurse package/* subscription-package/ -Force
+
+  Write-Host "Compressing (~30MB, this takes a minute)..." -ForegroundColor Yellow
+  Compress-Archive -Path subscription-package\* -DestinationPath subscription-lambda.zip -Force
+  Write-Host "✅ Subscription manager packaged" -ForegroundColor Green
+}
 
 # Deploy subscription manager Lambda
 Write-Host ""
