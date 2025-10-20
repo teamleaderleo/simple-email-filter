@@ -234,15 +234,19 @@ def process_webhook_notification(notification):
 def lambda_handler(event, context):
     """Lambda entry point for webhook handling"""
 
-    print(f"Received event: {json.dumps(event)}")
+    # Log the full event to see what Microsoft is sending
+    print(f"=== RAW EVENT START ===")
+    print(json.dumps(event))
+    print(f"=== RAW EVENT END ===")
 
     # Handle validation request from Microsoft
     # When you first create a subscription, Microsoft sends a validation token
     query_params = event.get("queryStringParameters")
+    print(f"Query params: {query_params}")
 
     if query_params and "validationToken" in query_params:
         validation_token = query_params["validationToken"]
-        print(f"Validation request received, returning token: {validation_token}")
+        print(f"VALIDATION: Returning token: {validation_token}")
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "text/plain"},
