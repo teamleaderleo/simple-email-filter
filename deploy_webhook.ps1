@@ -71,7 +71,7 @@ if (Test-Path .env) {
 
 $CLIENT_ID = $env:CLIENT_ID
 $OPENAI_API_KEY = $env:OPENAI_API_KEY
-$REGION = "us-east-1"
+$REGION = "us-east-2"  # Using us-east-2 (Ohio) to avoid us-east-1 outage issues
 
 if (-not $CLIENT_ID -or -not $OPENAI_API_KEY) {
   Write-Host "❌ Error: CLIENT_ID and OPENAI_API_KEY must be set in .env file"

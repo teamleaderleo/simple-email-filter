@@ -19,8 +19,9 @@ CLIENT_ID = os.environ.get("CLIENT_ID")
 TABLE_NAME = "email-filter-tokens"
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
+AWS_REGION = "us-east-2"  # Match your deployment region
 
-dynamodb = boto3.resource("dynamodb")
+dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(TABLE_NAME)
 
 

@@ -1,26 +1,21 @@
-"""
-One-time setup script to create Microsoft Graph subscription for webhook notifications.
-Run this after deploying the webhook Lambda and API Gateway.
-"""
-
 import msal
 import requests
 import json
 import os
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError
 
-# Load environment variables
-load_dotenv()
-
+# Configuration from environment variables
 CLIENT_ID = os.environ.get("CLIENT_ID")
 TABLE_NAME = "email-filter-tokens"
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 
-dynamodb = boto3.resource("dynamodb")
+# Use Lambda's region (automatically set by AWS)
+dynamodb = boto3.resource(
+    "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-2")
+)
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -69,124 +64,75 @@ def authenticate_microsoft():
             return result["access_token"]
 
     raise Exception(
-        "No valid cached token found. Run setup_token.py first to authenticate."
+        "No valid cached token found. You need to authenticate locally first "
+        "and upload the token cache to DynamoDB. Run setup_token.py again."
     )
 
 
-def save_subscription_id(subscription_id):
-    """Save subscription ID to DynamoDB"""
+def get_subscription_id():
+    """Retrieve subscription ID from DynamoDB"""
     try:
-        table.put_item(
-            Item={"id": "webhook-subscription", "subscription_id": subscription_id}
-        )
-        print(f"Saved subscription ID to DynamoDB: {subscription_id}")
+        response = table.get_item(Key={"id": "webhook-subscription"})
+        if "Item" in response:
+            return response["Item"].get("subscription_id")
+        return None
     except ClientError as e:
-        print(f"Error saving subscription ID: {e}")
+        print(f"Error reading subscription ID from DynamoDB: {e}")
+        return None
 
 
-def create_subscription(webhook_url):
-    """Create a new Microsoft Graph subscription"""
+def renew_subscription():
+    """Renew the Microsoft Graph subscription"""
 
-    print(f"Creating subscription with webhook URL: {webhook_url}")
+    # Get subscription ID
+    subscription_id = get_subscription_id()
+    if not subscription_id:
+        raise Exception(
+            "No subscription ID found in DynamoDB. Run setup_webhook.py first."
+        )
+
+    print(f"Renewing subscription: {subscription_id}")
 
     # Authenticate
     token = authenticate_microsoft()
 
-    # Get user info to find junk folder
-    session = requests.Session()
-    session.headers.update({"Authorization": f"Bearer {token}"})
+    # Calculate new expiration (2.5 days from now to be safe)
+    new_expiration = datetime.utcnow() + timedelta(days=2, hours=12)
+    expiration_str = new_expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
 
-    folders = (
-        session.get("https://graph.microsoft.com/v1.0/me/mailFolders?$top=100")
-        .json()
-        .get("value", [])
-    )
-    junk = next(
-        (
-            f
-            for f in folders
-            if f.get("displayName", "").lower() in ("junk email", "junk")
-        ),
-        None,
-    )
-
-    if not junk:
-        raise Exception("No Junk Email folder found")
-
-    junk_id = junk["id"]
-    print(f"Found Junk Email folder: {junk_id}")
-
-    # Calculate expiration (2.5 days from now)
-    expiration = datetime.utcnow() + timedelta(days=2, hours=12)
-    expiration_str = expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
-
-    # Create subscription
-    subscription_url = "https://graph.microsoft.com/v1.0/subscriptions"
+    # Renew the subscription
+    renew_url = f"https://graph.microsoft.com/v1.0/subscriptions/{subscription_id}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-    payload = {
-        "changeType": "created",
-        "notificationUrl": webhook_url,
-        "resource": f"me/mailFolders('{junk_id}')/messages",
-        "expirationDateTime": expiration_str,
-        "clientState": "SecretClientState",  # Used to verify notifications
-    }
+    payload = {"expirationDateTime": expiration_str}
 
-    print(f"\nCreating subscription with payload:")
-    print(json.dumps(payload, indent=2))
+    response = requests.patch(renew_url, headers=headers, json=payload)
 
-    response = requests.post(subscription_url, headers=headers, json=payload)
-
-    if response.status_code == 201:
+    if response.status_code == 200:
         result = response.json()
-        subscription_id = result.get("id")
-
-        print(f"\n✅ Subscription created successfully!")
-        print(f"Subscription ID: {subscription_id}")
-        print(f"Expires: {result.get('expirationDateTime')}")
-
-        # Save to DynamoDB
-        save_subscription_id(subscription_id)
-
-        return subscription_id
+        print(f"Subscription renewed successfully!")
+        print(f"New expiration: {result.get('expirationDateTime')}")
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "message": "Subscription renewed",
+                    "subscription_id": subscription_id,
+                    "expires": result.get("expirationDateTime"),
+                }
+            ),
+        }
     else:
-        error_msg = f"Failed to create subscription: HTTP {response.status_code}"
-        print(f"\n❌ {error_msg}")
+        error_msg = f"Failed to renew subscription: HTTP {response.status_code}"
+        print(error_msg)
         print(f"Response: {response.text}")
         raise Exception(error_msg)
 
 
-def main():
-    """Main setup flow"""
-    print("=== Microsoft Graph Webhook Setup ===\n")
-
-    # Get webhook URL from user
-    print("First, you need to deploy the webhook Lambda and API Gateway.")
-    print("Then come back here with the API Gateway URL.\n")
-
-    webhook_url = input("Enter your API Gateway webhook URL: ").strip()
-
-    if not webhook_url.startswith("https://"):
-        print("❌ URL must start with https://")
-        return
-
-    print("\nProceeding with subscription creation...")
-
+def lambda_handler(event, context):
+    """Lambda entry point for subscription renewal"""
     try:
-        subscription_id = create_subscription(webhook_url)
-
-        print("\n" + "=" * 50)
-        print("✅ Setup complete!")
-        print("=" * 50)
-        print("\nNext steps:")
-        print("1. The subscription will be automatically renewed every 2 days")
-        print("2. Test by sending spam to your Outlook junk folder")
-        print("3. Check Lambda logs to see webhook processing")
-        print(f"\nSubscription ID (saved to DynamoDB): {subscription_id}")
-
+        return renew_subscription()
     except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-
-
-if __name__ == "__main__":
-    main()
+        print(f"Error: {str(e)}")
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}

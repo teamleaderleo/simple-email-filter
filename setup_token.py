@@ -13,7 +13,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 TABLE_NAME = "email-filter-tokens"
-AWS_REGION = "us-east-1"  # Change to your preferred region
+AWS_REGION = "us-east-2"  # Change to your preferred region
 
 
 def authenticate_and_upload():
