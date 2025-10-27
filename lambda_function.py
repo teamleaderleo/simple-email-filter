@@ -84,7 +84,7 @@ def get_deletion_decisions(emails):
 
 DELETE only:
 - Obvious phishing/scams (fake verification, fake cloud storage warnings)
-- ALL casino related stuff (ANYTHING with "Free Spins")
+- ALL casino related stuff (ANYTHING with "Free Spins" or "amazing casino bonus")
 - Dangerous malware/fraud attempts
 - Clearly fake sender addresses
 - "Free car repair kit" type giveaways (it's not really CAA!)

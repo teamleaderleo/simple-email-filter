@@ -83,13 +83,15 @@ PREVIEW: {email['preview'][:200]}"""
 
 DELETE only:
 - Obvious phishing/scams (fake verification, fake cloud storage warnings)
-- Basically ALL casino related stuff
+- ALL casino related stuff (ANYTHING with "Free Spins" or "amazing casino bonus")
 - Dangerous malware/fraud attempts
 - Clearly fake sender addresses
 - "Free car repair kit" type giveaways (it's not really CAA!)
 - "Free Yeti Tumbler" type giveaways (not really Tim Hortons!)
-- Stuff like "You've got $1,538 — why wait to spend it? Re: MtOWzw"
+- Stuff like "You’ve got $1,538 — why wait to spend it? Re: MtOWzw"
 - Stuff like "Congrats! You've Scored $50 Off + FREE Gift."
+- "use the code FORTUNE1 for an amazing"
+- Anything with the money eyes emoji
 
 KEEP things like:
 - Legitimate service notifications (AWS, Google, etc.)
