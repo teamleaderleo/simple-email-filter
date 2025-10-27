@@ -7,6 +7,9 @@
 
 $ErrorActionPreference = "Stop"
 
+# Disable AWS CLI pager
+$env:AWS_PAGER = ""
+
 # Function to compress using 7zip (much faster) or fallback to Compress-Archive
 function Compress-FastZip {
   param(
