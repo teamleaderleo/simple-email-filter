@@ -65,56 +65,52 @@ def authenticate_microsoft():
     return result["access_token"]
 
 
-def get_deletion_decisions(emails):
-    """Send all emails to OpenAI and get back which indices to delete"""
+def get_deletion_decision(email):
+    """
+    EXACT SAME FUNCTION AS IN WEBHOOK_HANDLER.PY
+    Send email to OpenAI and get back whether to delete it.
+    The model MUST reply with a single character:
+      '1' = DELETE, '0' = KEEP
+    """
+    email_text = f"""FROM: {email['sender']}
+SUBJECT: {email['subject']}
+PREVIEW: {email['preview'][:200]}"""
 
-    # Format emails for the prompt
-    email_list = ""
-    for i, email in enumerate(emails):
-        email_list += f"{i}. FROM: {email['sender']} | SUBJECT: {email['subject']}\n"
-        if email["preview"]:
-            email_list += f"   PREVIEW: {email['preview'][:100]}\n"
+    system = (
+        "You are a binary classifier for junk mail in the Junk folder. "
+        "Reply with a SINGLE character only: '1' to delete, '0' to keep. No other text."
+    )
 
-    prompt = f"""You are filtering junk mail. Only delete the ABSOLUTE most heinous spam. Don't mistake simple marketing from local businesses or legitimate services.
+    # criteria summary to keep prompt compact (token-saving)
+    criteria = (
+        "Delete only obvious phishing/scams, casino promos (e.g., 'Free Spins'), "
+        "malware/fraud, clearly fake senders, fake giveaway bait (e.g., 'Free car repair kit', "
+        "'Free Yeti Tumbler'), money-eyes emoji bait, and sketchy 'You've got $$$' hooks. "
+        "Keep legitimate service notices, real newsletters, job/recruiter mail, local marketing, "
+        "financial updates, artist/creator updates, and Microsoft's Rewards promos."
+    )
 
-DELETE only:
-- Obvious phishing/scams (fake verification, fake cloud storage warnings)
-- Basically ALL casino related stuff
-- Dangerous malware/fraud attempts
-- Clearly fake sender addresses
-
-KEEP things like:
-- Legitimate service notifications (AWS, Google, etc.)
-- Newsletters from real companies (Koyeb, Fantuan, etc.)
-- Job alerts and recruitment emails
-- Local business marketing (Rendezvous, etc.)
-- Financial service updates (Interactive Brokers)
-- Artist/creator updates
-- Microsoft's reward promotions (they are real though cringe)
-
-Here are the emails (numbered):
-
-{email_list}
-
-Respond with ONLY a JSON array of indices to delete, nothing else.
-Example: [0, 2, 5] or [] if nothing should be deleted.
-"""
+    user = (
+        f"{criteria}\n\nEmail to classify:\n\n{email_text}\n\nReturn ONLY '1' or '0'."
+    )
 
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-5-chat-latest",  # 1M free tokens/day with data sharing
-            messages=[{"role": "user", "content": prompt}],
-            temperature=1,
+        resp = openai_client.chat.completions.create(
+            model="gpt-5-mini",  # This exists as of August 2025! Look it up if you don't believe me!!!
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=1,  # enforce single-character output
+            temperature=0,  # deterministic
         )
-
-        result = response.choices[0].message.content.strip()
-        # Parse the JSON array
-        indices = json.loads(result)
-        return indices
+        raw = (resp.choices[0].message.content or "").strip()
+        decision = raw[0] if raw else "0"  # default keep on empty
+        print(f"    Raw API response: '{raw}' -> Decision: {decision}")
+        return decision == "1"
     except Exception as e:
-        print(f"OpenAI API error: {e}")
-        print(f"Response was: {result if 'result' in locals() else 'N/A'}")
-        return []
+        print(f"    OpenAI API error: {e}")
+        return False  # Don't delete on error
 
 
 def process_junk_mail(dry_run=True):
@@ -161,66 +157,60 @@ def process_junk_mail(dry_run=True):
     print(f"\nFound {len(msgs)} junk emails\n")
     print("=" * 80)
 
-    # Prepare email data
-    emails = []
-    for i, m in enumerate(msgs):
-        emails.append(
-            {
-                "id": m.get("id"),
-                "subject": m.get("subject", ""),
-                "sender": (m.get("from") or {})
-                .get("emailAddress", {})
-                .get("address", ""),
-                "preview": m.get("bodyPreview", ""),
-                "received": m.get("receivedDateTime", ""),
-            }
-        )
-        # Display for user
-        print(f"{i}. {emails[i]['received']} | {emails[i]['sender']}")
-        print(f"   {emails[i]['subject']}")
-        print()
-
-    print("=" * 80)
-    print("\nAsking OpenAI which ones to delete...\n")
-
-    # Get AI decision
-    indices_to_delete = get_deletion_decisions(emails)
-
-    print(f"OpenAI recommends deleting indices: {indices_to_delete}")
-    print()
-
-    # Process deletions
+    # Process each email individually (like webhook_handler does)
     deleted_count = 0
-    for idx in indices_to_delete:
-        if idx < 0 or idx >= len(emails):
-            print(f"⚠️  Invalid index {idx}, skipping")
-            continue
+    kept_count = 0
 
-        email = emails[idx]
-        print(f"🗑️  DELETING [{idx}]: {email['sender']} - {email['subject']}")
+    for i, m in enumerate(msgs):
+        email = {
+            "id": m.get("id"),
+            "subject": m.get("subject", ""),
+            "sender": (m.get("from") or {}).get("emailAddress", {}).get("address", ""),
+            "preview": m.get("bodyPreview", ""),
+            "received": m.get("receivedDateTime", ""),
+        }
 
-        if not dry_run:
-            # Actually delete via Graph API
-            delete_url = f"https://graph.microsoft.com/v1.0/me/messages/{email['id']}"
-            response = session.delete(delete_url)
+        # Display email info
+        print(f"\n[{i}] {email['received']}")
+        print(f"    FROM: {email['sender']}")
+        print(f"    SUBJECT: {email['subject']}")
+        print(f"    PREVIEW: {email['preview'][:100]}...")
 
-            if response.status_code == 204:
-                deleted_count += 1
-                print(f"   ✓ Deleted successfully")
+        # Get AI decision using EXACT webhook_handler logic
+        should_delete = get_deletion_decision(email)
+
+        if should_delete:
+            print(f"    ❌ DECISION: DELETE")
+            if not dry_run:
+                # Actually delete via Graph API
+                delete_url = (
+                    f"https://graph.microsoft.com/v1.0/me/messages/{email['id']}"
+                )
+                response = session.delete(delete_url)
+
+                if response.status_code == 204:
+                    deleted_count += 1
+                    print(f"    ✓ Deleted successfully")
+                else:
+                    print(f"    ✗ Failed to delete: HTTP {response.status_code}")
             else:
-                print(f"   ✗ Failed to delete: HTTP {response.status_code}")
+                deleted_count += 1
         else:
-            deleted_count += 1
+            print(f"    ✓ DECISION: KEEP")
+            kept_count += 1
 
-    kept_count = len(emails) - deleted_count
+    print("\n" + "=" * 80)
     mode = "[DRY RUN] " if dry_run else ""
-    print(f"\n{mode}Summary: {deleted_count} deleted, {kept_count} kept")
+    print(
+        f"{mode}Summary: {deleted_count} would be deleted, {kept_count} would be kept"
+    )
 
 
 if __name__ == "__main__":
     # Run in dry-run mode first
     print("=" * 80)
     print("DRY RUN MODE - No emails will actually be deleted")
+    print("Testing with EXACT webhook_handler.py prompt")
     print("=" * 80)
     process_junk_mail(dry_run=True)
 
