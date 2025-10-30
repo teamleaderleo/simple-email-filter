@@ -179,6 +179,10 @@ aws lambda get-function --function-name email-webhook-handler --region $REGION 2
 if ($LASTEXITCODE -eq 0) {
   Write-Host "Updating existing Lambda function..." -ForegroundColor Yellow
   aws lambda update-function-code --function-name email-webhook-handler --zip-file fileb://webhook-lambda.zip --region $REGION
+  
+  Write-Host "Waiting for code update to complete..." -ForegroundColor Yellow
+  aws lambda wait function-updated --function-name email-webhook-handler --region $REGION
+  
   aws lambda update-function-configuration --function-name email-webhook-handler --timeout 60 --memory-size 256 --environment "Variables={CLIENT_ID=$CLIENT_ID,OPENAI_API_KEY=$OPENAI_API_KEY}" --region $REGION
 }
 else {
@@ -253,6 +257,10 @@ aws lambda get-function --function-name email-subscription-manager --region $REG
 if ($LASTEXITCODE -eq 0) {
   Write-Host "Updating existing Lambda function..." -ForegroundColor Yellow
   aws lambda update-function-code --function-name email-subscription-manager --zip-file fileb://subscription-lambda.zip --region $REGION
+  
+  Write-Host "Waiting for code update to complete..." -ForegroundColor Yellow
+  aws lambda wait function-updated --function-name email-subscription-manager --region $REGION
+  
   aws lambda update-function-configuration --function-name email-subscription-manager --timeout 30 --memory-size 128 --environment "Variables={CLIENT_ID=$CLIENT_ID}" --region $REGION
 }
 else {
