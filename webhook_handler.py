@@ -73,48 +73,46 @@ def authenticate_microsoft():
 
 
 def get_deletion_decision(email):
-    """Send email to OpenAI and get back whether to delete it"""
-
+    """
+    Send email to OpenAI and get back whether to delete it.
+    The model MUST reply with a single character:
+      '1' = DELETE, '0' = KEEP
+    """
     email_text = f"""FROM: {email['sender']}
 SUBJECT: {email['subject']}
 PREVIEW: {email['preview'][:200]}"""
 
-    prompt = f"""You are filtering junk mail. Only delete the ABSOLUTE most heinous spam. Don't mistake simple marketing from local businesses or legitimate services.
+    system = (
+        "You are a binary classifier for junk mail in the Junk folder. "
+        "Reply with a SINGLE character only: '1' to delete, '0' to keep. No other text."
+    )
 
-DELETE only:
-- Obvious phishing/scams (fake verification, fake cloud storage warnings)
-- ALL casino related stuff (ANYTHING with "Free Spins" or "amazing casino bonus")
-- Dangerous malware/fraud attempts
-- Clearly fake sender addresses
-- "Free car repair kit" type giveaways (it's not really CAA!)
-- "Free Yeti Tumbler" type giveaways (not really Tim Hortons!)
-- Stuff like "You’ve got $1,538 — why wait to spend it? Re: MtOWzw"
-- Stuff like "Congrats! You've Scored $50 Off + FREE Gift."
-- "use the code FORTUNE1 for an amazing"
-- Anything with the money eyes emoji
+    # criteria summary to keep prompt compact (token-saving)
+    criteria = (
+        "Delete only obvious phishing/scams, casino promos (e.g., 'Free Spins'), "
+        "malware/fraud, clearly fake senders, fake giveaway bait (e.g., 'Free car repair kit', "
+        "'Free Yeti Tumbler'), money-eyes emoji bait, and sketchy 'You've got $$$' hooks. "
+        "Keep legitimate service notices, real newsletters, job/recruiter mail, local marketing, "
+        "financial updates, artist/creator updates, and Microsoft's Rewards promos."
+    )
 
-KEEP things like:
-- Legitimate service notifications (AWS, Google, etc.)
-- Newsletters from real companies (Koyeb, Fantuan, etc.)
-- Job alerts and recruitment emails
-- Local business marketing (Rendezvous, etc.)
-- Financial service updates (Interactive Brokers)
-- Artist/creator updates
-- Microsoft's reward promotions (they are real though cringe)
-
-Email to classify:
-
-{email_text}
-
-Respond with ONLY "DELETE" or "KEEP", nothing else."""
+    user = (
+        f"{criteria}\n\nEmail to classify:\n\n{email_text}\n\nReturn ONLY '1' or '0'."
+    )
 
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}]
+        resp = openai_client.chat.completions.create(
+            model="gpt-5-mini", # This exists as of August 2025! Look it up if you don't believe me!!!
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=1,  # enforce single-character output
+            temperature=0,  # deterministic
         )
-
-        result = response.choices[0].message.content.strip().upper()
-        return result == "DELETE"
+        raw = (resp.choices[0].message.content or "").strip()
+        decision = raw[0] if raw else "0"  # default keep on empty
+        return decision == "1"
     except Exception as e:
         print(f"OpenAI API error: {e}")
         return False  # Don't delete on error
@@ -205,7 +203,7 @@ def process_webhook_notification(notification):
 
         print(f"Processing: {email['sender']} - {email['subject']}")
 
-        # Ask OpenAI if we should delete
+        # Ask OpenAI if we should delete (True if model returns '1')
         should_delete = get_deletion_decision(email)
 
         if should_delete:
