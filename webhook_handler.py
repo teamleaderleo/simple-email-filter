@@ -107,8 +107,8 @@ PREVIEW: {email['preview'][:200]}"""
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            max_completion_tokens=1,  # enforce single-character output
-            temperature=0,  # deterministic
+            # don't limit the completion tokens!
+            # no temperature parameter is allowed! gpt-5 is smart enough
         )
         raw = (resp.choices[0].message.content or "").strip()
         decision = raw[0] if raw else "0"  # default keep on empty
