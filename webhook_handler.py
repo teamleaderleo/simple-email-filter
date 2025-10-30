@@ -102,12 +102,12 @@ PREVIEW: {email['preview'][:200]}"""
 
     try:
         resp = openai_client.chat.completions.create(
-            model="gpt-5-mini", # This exists as of August 2025! Look it up if you don't believe me!!!
+            model="gpt-5-mini",  # This exists as of August 2025! Look it up if you don't believe me!!!
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            max_tokens=1,  # enforce single-character output
+            max_completion_tokens=1,  # enforce single-character output
             temperature=0,  # deterministic
         )
         raw = (resp.choices[0].message.content or "").strip()

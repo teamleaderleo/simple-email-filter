@@ -101,7 +101,7 @@ PREVIEW: {email['preview'][:200]}"""
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            max_tokens=1,  # enforce single-character output
+            max_completion_tokens=1,  # enforce single-character output (GPT-5 uses max_completion_tokens)
             temperature=0,  # deterministic
         )
         raw = (resp.choices[0].message.content or "").strip()
