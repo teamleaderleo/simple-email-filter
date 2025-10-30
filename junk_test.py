@@ -1,7 +1,6 @@
 import msal
 import requests
 import sys
-import json
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
@@ -106,15 +105,16 @@ PREVIEW: {email['preview'][:200]}"""
         )
         raw = (resp.choices[0].message.content or "").strip()
         decision = raw[0] if raw else "0"  # default keep on empty
-        print(f"    Raw API response: '{raw}' -> Decision: {decision}")
+        print(f"\nRaw API response: '{raw}'")
+        print(f"Decision: {decision} ({'DELETE' if decision == '1' else 'KEEP'})")
         return decision == "1"
     except Exception as e:
-        print(f"    OpenAI API error: {e}")
+        print(f"\nOpenAI API error: {e}")
         return False  # Don't delete on error
 
 
-def process_junk_mail(dry_run=True):
-    """Main function to process and clean junk mail"""
+def process_latest_junk(count=1, delete=False):
+    """Process the latest N junk emails and delete if GPT-5 says so"""
 
     # Authenticate
     token = authenticate_microsoft()
@@ -140,24 +140,22 @@ def process_junk_mail(dry_run=True):
 
     junk_id = junk["id"]
 
-    # Get recent junk messages
+    # Get latest N junk messages
     msgs = (
         session.get(
             f"https://graph.microsoft.com/v1.0/me/mailFolders/{junk_id}/messages",
-            params={"$top": 20, "$orderby": "receivedDateTime desc"},
+            params={"$top": count, "$orderby": "receivedDateTime desc"},
         )
         .json()
         .get("value", [])
     )
 
     if not msgs:
-        print("No junk emails to process.")
+        print("No junk emails found.")
         return
 
-    print(f"\nFound {len(msgs)} junk emails\n")
-    print("=" * 80)
+    print(f"\nProcessing {len(msgs)} latest junk email(s)\n")
 
-    # Process each email individually (like webhook_handler does)
     deleted_count = 0
     kept_count = 0
 
@@ -171,51 +169,74 @@ def process_junk_mail(dry_run=True):
         }
 
         # Display email info
-        print(f"\n[{i}] {email['received']}")
-        print(f"    FROM: {email['sender']}")
-        print(f"    SUBJECT: {email['subject']}")
-        print(f"    PREVIEW: {email['preview'][:100]}...")
+        print("\n" + "=" * 80)
+        print(f"EMAIL {i+1}/{len(msgs)}:")
+        print("=" * 80)
+        print(f"Received: {email['received']}")
+        print(f"From: {email['sender']}")
+        print(f"Subject: {email['subject']}")
+        print(f"Preview: {email['preview'][:200]}")
+        print("=" * 80)
 
-        # Get AI decision using EXACT webhook_handler logic
+        # Get AI decision
         should_delete = get_deletion_decision(email)
 
         if should_delete:
-            print(f"    ❌ DECISION: DELETE")
-            if not dry_run:
-                # Actually delete via Graph API
+            if delete:
+                print("\n🗑️  DELETING EMAIL...")
                 delete_url = (
                     f"https://graph.microsoft.com/v1.0/me/messages/{email['id']}"
                 )
                 response = session.delete(delete_url)
 
                 if response.status_code == 204:
+                    print("✅ Successfully deleted!")
                     deleted_count += 1
-                    print(f"    ✓ Deleted successfully")
                 else:
-                    print(f"    ✗ Failed to delete: HTTP {response.status_code}")
+                    print(f"❌ Failed to delete: HTTP {response.status_code}")
             else:
+                print("\n🗑️  WOULD DELETE (dry-run mode)")
                 deleted_count += 1
         else:
-            print(f"    ✓ DECISION: KEEP")
+            print("\n✅ KEEP")
             kept_count += 1
 
     print("\n" + "=" * 80)
-    mode = "[DRY RUN] " if dry_run else ""
-    print(
-        f"{mode}Summary: {deleted_count} would be deleted, {kept_count} would be kept"
-    )
+    mode = "" if delete else "[DRY-RUN] "
+    print(f"{mode}SUMMARY: {deleted_count} deleted, {kept_count} kept")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
-    # Run in dry-run mode first
-    print("=" * 80)
-    print("DRY RUN MODE - No emails will actually be deleted")
-    print("Testing with EXACT webhook_handler.py prompt")
-    print("=" * 80)
-    process_junk_mail(dry_run=True)
+    # Parse arguments
+    count = 1
+    delete = False
 
-    # Uncomment below to actually delete emails
-    # print("\n" + "=" * 80)
-    # print("LIVE MODE - Actually deleting emails")
-    # print("=" * 80)
-    # process_junk_mail(dry_run=False)
+    for arg in sys.argv[1:]:
+        if arg == "--delete":
+            delete = True
+        else:
+            try:
+                count = int(arg)
+                if count < 1:
+                    print("Count must be at least 1")
+                    sys.exit(1)
+            except ValueError:
+                print(f"Invalid argument: {arg}")
+                print("Usage: python junk_test.py [count] [--delete]")
+                print("Examples:")
+                print("  python junk_test.py           # Dry-run on latest 1 email")
+                print("  python junk_test.py 5         # Dry-run on latest 5 emails")
+                print(
+                    "  python junk_test.py --delete  # Actually delete latest 1 email"
+                )
+                print(
+                    "  python junk_test.py 10 --delete  # Actually delete latest 10 emails"
+                )
+                sys.exit(1)
+
+    print("=" * 80)
+    mode = "DELETING" if delete else "DRY-RUN"
+    print(f"{mode}: LATEST {count} JUNK EMAIL(S)")
+    print("=" * 80)
+    process_latest_junk(count, delete)
