@@ -85,8 +85,11 @@ PREVIEW: {email['preview'][:200]}"""
         "Delete only obvious phishing/scams, casino promos (e.g., 'Free Spins'), "
         "malware/fraud, clearly fake senders, fake giveaway bait (e.g., 'Free car repair kit', "
         "'Free Yeti Tumbler'), money-eyes emoji bait, and sketchy 'You've got $$$' hooks. "
-        "Keep legitimate service notices, real newsletters, job/recruiter mail, local marketing, "
-        "financial updates, artist/creator updates, and Microsoft's Rewards promos."
+        "Also delete brandless account/storage/security 'Action Required' emails (e.g., 'Cloud Service Notification', "
+        "'Set Up Your Account', 'Running out of storage? — Upgrade') when there is a sender-brand mismatch or they lack a real brand; "
+        "mojibake in the subject (e.g., 'Ã¢', 'Â', 'â€'), typos, or weird inline timestamps strengthen deletion. "
+        "Keep legitimate service notices, real newsletters, job/recruiter mail, local marketing, financial updates, "
+        "artist/creator updates, and Microsoft's Rewards promos when the brand matches the sender and no phishing language is used."
     )
 
     user = (
