@@ -27,6 +27,7 @@ logs
 Thumbs.db
 
 # Environment files
+.venv/
 .env
 .env.local
 .env.*.local
