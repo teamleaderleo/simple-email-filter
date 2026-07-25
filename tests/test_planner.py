@@ -73,7 +73,7 @@ class RetentionPlannerTests(unittest.TestCase):
         )
         self.assertEqual([item.message_id for item in plan], ["third"])
 
-    def test_first_matching_policy_wins(self):
+    def test_first_matching_policy_wins_even_when_input_is_unsorted(self):
         protected = Policy(
             id="protected",
             description="",
@@ -93,7 +93,7 @@ class RetentionPlannerTests(unittest.TestCase):
         )
         plan = build_retention_plan(
             [message("receipt", 100, subject="Your receipt")],
-            [protected, broad],
+            [broad, protected],
             now=NOW,
         )
         self.assertEqual(plan, [])
