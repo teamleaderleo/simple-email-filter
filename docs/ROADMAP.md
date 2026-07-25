@@ -16,9 +16,9 @@ The project will move in small, reviewable steps. Existing Junk filtering remain
 
 - [ ] Move existing token-cache code into the shared authentication module.
 - [ ] Move Graph request, pagination and retry logic into the shared client.
-- [ ] Migrate the current Junk webhook without changing its behaviour.
-- [ ] Validate webhook `clientState` and use immutable message identifiers.
-- [ ] Fetch the exact message referenced by each notification.
+- [x] Harden the current Junk webhook without changing its classification behaviour.
+- [x] Validate webhook `clientState` and use immutable message identifiers.
+- [x] Fetch the exact message referenced by each notification.
 
 ## Phase 3 — Mailbox ingestion and activity
 

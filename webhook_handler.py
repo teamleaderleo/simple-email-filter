@@ -1,7 +1,10 @@
+import hashlib
+import hmac
 import json
 import os
 import re
-from urllib.parse import quote
+import time
+from urllib.parse import quote, unquote
 
 import boto3
 import msal
@@ -13,9 +16,10 @@ CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_MODEL = os.environ.get("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4b-it")
 
-TABLE_NAME = "email-filter-tokens"
+TABLE_NAME = os.environ.get("TOKEN_TABLE_NAME", "email-filter-tokens")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
+
 
 dynamodb = boto3.resource(
     "dynamodb",
@@ -159,7 +163,7 @@ def cloudflare_delete_decision(email):
     preview = email.get("preview", "")
 
     url = (
-        f"https://api.cloudflare.com/client/v4/accounts/"
+        "https://api.cloudflare.com/client/v4/accounts/"
         f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_MODEL}"
     )
 
@@ -244,191 +248,273 @@ def get_deletion_decision(email):
     return cloudflare_delete_decision(email)
 
 
+def load_subscription_record():
+    response = table.get_item(Key={"id": "webhook-subscription"})
+    record = response.get("Item") or {}
+    if not record.get("subscription_id") or not record.get("client_state"):
+        raise RuntimeError(
+            "Webhook subscription security record is missing or incomplete."
+        )
+    return record
+
+
+def is_notification_authentic(
+    notification,
+    expected_client_state,
+    expected_subscription_id=None,
+):
+    if not expected_client_state:
+        return False
+
+    received_state = str(notification.get("clientState") or "")
+    if not hmac.compare_digest(received_state, str(expected_client_state)):
+        return False
+
+    if expected_subscription_id:
+        received_subscription = str(notification.get("subscriptionId") or "")
+        if not hmac.compare_digest(
+            received_subscription,
+            str(expected_subscription_id),
+        ):
+            return False
+
+    return True
+
+
+def extract_message_id(notification):
+    resource_data = notification.get("resourceData") or {}
+    message_id = resource_data.get("id")
+    if message_id:
+        return str(message_id)
+
+    resource = str(notification.get("resource") or "")
+    for pattern in (r"/messages/([^/?]+)", r"/messages\('([^']+)'\)"):
+        match = re.search(pattern, resource, re.I)
+        if match:
+            return unquote(match.group(1))
+
+    return None
+
+
 def get_junk_folder_id(session):
     response = session.get(
-        "https://graph.microsoft.com/v1.0/me/mailFolders",
-        params={"$top": 100},
+        "https://graph.microsoft.com/v1.0/me/mailFolders/junkemail",
+        params={"$select": "id"},
+        timeout=30,
     )
-    response.raise_for_status()
-
-    folders = response.json().get("value", [])
-    junk = next(
-        (
-            f
-            for f in folders
-            if f.get("displayName", "").lower() in ("junk email", "junk")
-        ),
-        None,
-    )
-
-    if not junk:
+    if response.status_code == 404:
         return None
-
-    return junk["id"]
-
-
-def get_recent_junk_messages(session, junk_id, count=5):
-    response = session.get(
-        f"https://graph.microsoft.com/v1.0/me/mailFolders/{quote(junk_id, safe='')}/messages",
-        params={
-            "$top": count,
-            "$orderby": "receivedDateTime desc",
-            "$select": "id,subject,from,bodyPreview,receivedDateTime",
-        },
-    )
     response.raise_for_status()
-    return response.json().get("value", [])
+    return response.json().get("id")
 
 
-def load_seen_email_ids():
-    try:
-        response = table.get_item(Key={"id": "seen-emails"})
-        if "Item" in response:
-            return set(response["Item"].get("email_ids", []))
-    except Exception as e:
-        print(f"Seen-email cache read failed: {e}")
-
-    return set()
-
-
-def save_seen_email_ids(ids):
-    try:
-        capped = list(ids)[-100:]
-        table.put_item(Item={"id": "seen-emails", "email_ids": capped})
-    except Exception as e:
-        print(f"Seen-email cache update failed: {e}")
-
-
-def delete_message(session, message_id):
-    response = session.delete(
-        f"https://graph.microsoft.com/v1.0/me/messages/{quote(message_id, safe='')}"
+def get_message(session, message_id, max_attempts=3):
+    url = (
+        "https://graph.microsoft.com/v1.0/me/messages/"
+        f"{quote(message_id, safe='')}"
     )
-    return response.status_code == 204, response.status_code, response.text[:300]
+    for attempt in range(1, max_attempts + 1):
+        response = session.get(
+            url,
+            params={
+                "$select": (
+                    "id,subject,from,bodyPreview,receivedDateTime,parentFolderId"
+                )
+            },
+            timeout=30,
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code == 429 or 500 <= response.status_code < 600:
+            if attempt < max_attempts:
+                retry_after = response.headers.get("Retry-After")
+                delay = (
+                    int(retry_after)
+                    if retry_after and retry_after.isdigit()
+                    else 2 ** (attempt - 1)
+                )
+                time.sleep(min(delay, 8))
+                continue
+        response.raise_for_status()
+        return response.json()
+    return None
 
 
-def process_webhook_notification(notification):
-    token = authenticate_microsoft()
+def _seen_key(message_id):
+    digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+    return f"seen-email#{digest}"
 
-    session = requests.Session()
-    session.headers.update({"Authorization": f"Bearer {token}"})
 
-    resource = notification.get("resource")
-    if not resource:
-        print("No resource in notification.")
-        return {"processed": 0, "deleted": 0}
+def already_processed(message_id):
+    response = table.get_item(Key={"id": _seen_key(message_id)})
+    return "Item" in response
 
-    junk_id = get_junk_folder_id(session)
-    if not junk_id:
-        print("No Junk Email folder found.")
-        return {"processed": 0, "deleted": 0}
 
-    messages = get_recent_junk_messages(session, junk_id, count=5)
-    if not messages:
-        print("No recent junk messages found.")
-        return {"processed": 0, "deleted": 0}
+def mark_processed(message_id, outcome):
+    try:
+        table.put_item(
+            Item={
+                "id": _seen_key(message_id),
+                "outcome": outcome,
+                "processed_at": int(time.time()),
+                "expires_at": int(time.time()) + 30 * 24 * 60 * 60,
+            }
+        )
+    except Exception as e:
+        print(f"Seen-email write failed: {e}")
 
-    previous_ids = load_seen_email_ids()
-    current_ids = set(previous_ids)
 
-    processed = 0
-    deleted = 0
+def delete_message(session, message_id, max_attempts=3):
+    url = "https://graph.microsoft.com/v1.0/me/messages/" + quote(
+        message_id,
+        safe="",
+    )
+    last_response = None
+    for attempt in range(1, max_attempts + 1):
+        response = session.delete(url, timeout=30)
+        last_response = response
+        if response.status_code == 204:
+            return True, response.status_code, ""
+        if response.status_code != 429 and not 500 <= response.status_code < 600:
+            break
+        if attempt < max_attempts:
+            retry_after = response.headers.get("Retry-After")
+            delay = (
+                int(retry_after)
+                if retry_after and retry_after.isdigit()
+                else 2 ** (attempt - 1)
+            )
+            time.sleep(min(delay, 8))
 
-    for msg in messages:
-        message_id = msg.get("id")
-        if not message_id:
-            continue
+    return (
+        False,
+        last_response.status_code if last_response is not None else 0,
+        (last_response.text[:300] if last_response is not None else "no response"),
+    )
 
-        current_ids.add(message_id)
 
-        if message_id in previous_ids:
-            print(f"Skipping already-processed email: {message_id}")
-            continue
+def process_webhook_notification(notification, session, junk_id):
+    message_id = extract_message_id(notification)
+    if not message_id:
+        print("Notification did not contain a message id.")
+        return {"processed": 0, "deleted": 0, "failed": 1}
 
-        email = {
-            "id": message_id,
-            "subject": msg.get("subject", ""),
-            "sender": (msg.get("from") or {})
-            .get("emailAddress", {})
-            .get("address", ""),
-            "preview": msg.get("bodyPreview", ""),
-            "received": msg.get("receivedDateTime", ""),
-        }
+    if already_processed(message_id):
+        print("Skipping an already-processed notification.")
+        return {"processed": 0, "deleted": 0, "failed": 0}
 
-        processed += 1
+    message = get_message(session, message_id)
+    if not message:
+        print("The notified message no longer exists.")
+        return {"processed": 0, "deleted": 0, "failed": 0}
 
-        print(f"Processing: {email['sender']} - {email['subject']}")
+    if message.get("parentFolderId") != junk_id:
+        print("The notified message is no longer in Junk; leaving it alone.")
+        mark_processed(message_id, "not_in_junk")
+        return {"processed": 0, "deleted": 0, "failed": 0}
 
-        should_delete, decision = get_deletion_decision(email)
-        print(f"Decision: {decision}")
+    email = {
+        "id": message_id,
+        "subject": message.get("subject", ""),
+        "sender": (message.get("from") or {})
+        .get("emailAddress", {})
+        .get("address", ""),
+        "preview": message.get("bodyPreview", ""),
+        "received": message.get("receivedDateTime", ""),
+    }
 
-        if should_delete:
-            ok, status, body = delete_message(session, message_id)
-            if ok:
-                deleted += 1
-                print("Deleted successfully.")
-            else:
-                print(f"Delete failed: HTTP {status} {body}")
-        else:
-            print("Keeping email.")
+    print(f"Processing a Junk message from {email['sender']}.")
+    should_delete, decision = get_deletion_decision(email)
+    print(f"Decision: {decision}")
 
-    save_seen_email_ids(current_ids)
+    if not should_delete:
+        mark_processed(message_id, "kept")
+        print("Keeping email.")
+        return {"processed": 1, "deleted": 0, "failed": 0}
 
-    return {"processed": processed, "deleted": deleted}
+    ok, status, body = delete_message(session, message_id)
+    if ok:
+        mark_processed(message_id, "deleted")
+        print("Deleted successfully.")
+        return {"processed": 1, "deleted": 1, "failed": 0}
+
+    print(f"Delete failed: HTTP {status} {body}")
+    return {"processed": 1, "deleted": 0, "failed": 1}
 
 
 def lambda_handler(event, context):
-    print("=== RAW EVENT START ===")
-    print(json.dumps(event))
-    print("=== RAW EVENT END ===")
-
-    query_params = event.get("queryStringParameters")
-    print(f"Query params: {query_params}")
-
-    if query_params and "validationToken" in query_params:
-        validation_token = query_params["validationToken"]
-        print(f"VALIDATION: Returning token: {validation_token}")
+    query_params = event.get("queryStringParameters") or {}
+    if "validationToken" in query_params:
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "text/plain"},
-            "body": validation_token,
+            "body": query_params["validationToken"],
         }
 
     try:
-        body = json.loads(event.get("body", "{}"))
+        raw_body = event.get("body") or {}
+        body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
         notifications = body.get("value", [])
-
         if not notifications:
-            print("No notifications in request body.")
             return {
                 "statusCode": 200,
                 "body": json.dumps({"message": "No notifications"}),
             }
 
-        total_processed = 0
-        total_deleted = 0
+        subscription = load_subscription_record()
+        expected_client_state = subscription["client_state"]
+        expected_subscription_id = subscription["subscription_id"]
 
+        accepted = []
+        rejected = 0
         for notification in notifications:
-            change_type = notification.get("changeType")
-            print(f"Processing notification: changeType={change_type}")
+            if not is_notification_authentic(
+                notification,
+                expected_client_state,
+                expected_subscription_id,
+            ):
+                rejected += 1
+                print("Rejected notification with invalid subscription security values.")
+                continue
+            if notification.get("changeType") == "created":
+                accepted.append(notification)
 
-            if change_type == "created":
-                result = process_webhook_notification(notification)
-                total_processed += result["processed"]
-                total_deleted += result["deleted"]
+        if not accepted:
+            return {
+                "statusCode": 202,
+                "body": json.dumps(
+                    {
+                        "message": "No accepted created notifications",
+                        "rejected": rejected,
+                    }
+                ),
+            }
 
-        summary = f"Processed {total_processed} new emails, deleted {total_deleted}"
-        print(summary)
+        token = authenticate_microsoft()
+        session = requests.Session()
+        session.headers.update(
+            {
+                "Authorization": f"Bearer {token}",
+                "Prefer": 'IdType="ImmutableId"',
+            }
+        )
+        junk_id = get_junk_folder_id(session)
+        if not junk_id:
+            raise RuntimeError("No Junk Email folder found")
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps(
-                {
-                    "message": summary,
-                    "processed": total_processed,
-                    "deleted": total_deleted,
-                }
-            ),
+        totals = {"processed": 0, "deleted": 0, "failed": 0}
+        for notification in accepted:
+            result = process_webhook_notification(notification, session, junk_id)
+            for key in totals:
+                totals[key] += result[key]
+
+        summary = {
+            **totals,
+            "accepted": len(accepted),
+            "rejected": rejected,
         }
+        print(json.dumps(summary, sort_keys=True))
+        return {"statusCode": 200, "body": json.dumps(summary)}
 
     except Exception as e:
         print(f"Error processing webhook: {str(e)}")
