@@ -20,7 +20,10 @@ def build_retention_plan(
     current_time = current_time.astimezone(timezone.utc)
 
     excluded = excluded_folder_ids or set()
-    ordered_policies = [policy for policy in policies if policy.enabled]
+    ordered_policies = sorted(
+        (policy for policy in policies if policy.enabled),
+        key=lambda policy: (policy.priority, policy.id),
+    )
     matched: dict[str, list[MailMessage]] = defaultdict(list)
 
     for message in messages:
