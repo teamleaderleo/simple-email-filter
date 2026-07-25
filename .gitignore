@@ -31,6 +31,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Private retention policies
+policies/personal.json
+policies/*.private.json
+
 # Build output
 dist/
 build/

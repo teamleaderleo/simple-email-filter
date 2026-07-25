@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "notes": "Copy this file to a deployment-only location and adjust it. First matching policy wins.",
+  "policies": [
+    {
+      "id": "purchase-order-confirmations",
+      "description": "Keep order confirmations as a permanent purchase history.",
+      "priority": 10,
+      "match": {"senders": ["auto-confirm@amazon.ca"]},
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "purchase-receipts",
+      "description": "Keep receipts, invoices, refunds and warranties forever.",
+      "priority": 10,
+      "match": {
+        "senders": ["noreply@uber.com"],
+        "subjectContains": ["receipt", "invoice", "refund", "warranty"]
+      },
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "building-records",
+      "description": "Keep lease, legal and formal property records forever.",
+      "priority": 15,
+      "match": {
+        "senderDomains": ["iconconnect.ca"],
+        "subjectContains": ["lease", "legal notice", "management notice", "warranty"]
+      },
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "shipment-tracking",
+      "description": "Tracking updates are useful for disputes and returns, then expire.",
+      "priority": 20,
+      "match": {"senders": ["shipment-tracking@amazon.ca"]},
+      "retention": {"mode": "days", "days": 180}
+    },
+    {
+      "id": "building-package-notices",
+      "description": "Keep package notices for six months.",
+      "priority": 20,
+      "match": {
+        "senderDomains": ["iconconnect.ca"],
+        "subjectContains": ["package notification"]
+      },
+      "retention": {"mode": "days", "days": 180}
+    },
+    {
+      "id": "artstation-prints",
+      "description": "Keep a generous rolling time capsule of print announcements.",
+      "priority": 20,
+      "match": {
+        "senders": ["notifications@artstation.com"],
+        "subjectContains": ["published a new print"]
+      },
+      "retention": {"mode": "days_and_latest", "days": 365, "keepLatest": 150}
+    },
+    {
+      "id": "building-announcements",
+      "description": "Routine amenity, elevator and maintenance announcements expire after a year.",
+      "priority": 30,
+      "match": {"senderDomains": ["iconconnect.ca"]},
+      "retention": {"mode": "days", "days": 365}
+    },
+    {
+      "id": "artstation-digests",
+      "description": "Daily digests are enjoyable briefly, then expire.",
+      "priority": 30,
+      "match": {"senders": ["notifications@artstation.com"]},
+      "retention": {"mode": "days", "days": 60}
+    },
+    {
+      "id": "job-alerts",
+      "description": "Keep a recent rolling selection of job alerts.",
+      "priority": 40,
+      "match": {
+        "senders": [
+          "jobalerts-noreply@linkedin.com",
+          "alert@indeed.com",
+          "dice@connect.dice.com",
+          "help@welcometothejungle.com"
+        ]
+      },
+      "retention": {"mode": "days_and_latest", "days": 30, "keepLatest": 25}
+    },
+    {
+      "id": "deployment-alerts",
+      "description": "Keep the latest deployment failures long enough to be actionable.",
+      "priority": 40,
+      "match": {"senders": ["notifications@vercel.com"]},
+      "retention": {"mode": "days_and_latest", "days": 14, "keepLatest": 20}
+    },
+    {
+      "id": "marketing-promotions",
+      "description": "Known promotional feeds expire after a short browsing window.",
+      "priority": 80,
+      "match": {
+        "senders": [
+          "uber@uber.com",
+          "news@newsletter.hellofresh.ca",
+          "offers@youroffers.dominos.ca",
+          "email@deals.dominos.ca"
+        ]
+      },
+      "retention": {"mode": "days", "days": 45}
+    }
+  ]
+}
