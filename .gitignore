@@ -8,6 +8,7 @@ output.json
 test-event.json
 webhook-package/
 subscription-package/
+backups/
 
 # Node.js
 node_modules/
