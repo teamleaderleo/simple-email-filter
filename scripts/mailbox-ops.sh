@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-STATE_DIR="${MAILBOX_STATE_DIR:-$ROOT_DIR/.mailbox-cleanup/inbox}"
-CONFIG_FILE="${MAILBOX_CONFIG_FILE:-$STATE_DIR/config.env}"
+PROVISIONAL_STATE_DIR="${MAILBOX_STATE_DIR:-$ROOT_DIR/.mailbox-cleanup/inbox}"
+CONFIG_FILE="${MAILBOX_CONFIG_FILE:-$PROVISIONAL_STATE_DIR/config.env}"
 if [[ -f "$CONFIG_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -13,6 +13,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
   set +a
 fi
 
+STATE_DIR="${MAILBOX_STATE_DIR:-$ROOT_DIR/.mailbox-cleanup/inbox}"
 AWS_PROFILE="${AWS_PROFILE:-email}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
@@ -120,14 +121,18 @@ run_cached_tests() {
   chmod 600 "$TEST_STAMP" 2>/dev/null || true
 }
 
-run_check() {
+run_local_check() {
   local command_name
   for command_name in git aws make; do
     has_command "$command_name" || die "Missing required command: $command_name"
   done
   ensure_local_python
-  check_auth
   run_cached_tests
+}
+
+run_check() {
+  run_local_check
+  check_auth
   note "Mailbox checks passed"
 }
 
@@ -158,6 +163,7 @@ ensure_snapshot() {
     return
   fi
   apply_started && die "Apply results exist but the saved scan is incomplete. Do not replace this state directory."
+  check_auth
   note "No complete snapshot exists; starting or resuming the non-destructive Inbox audit"
   bash scripts/mailbox-cleanup.sh audit
   checkpoint_complete || die "The mailbox audit did not finish. Rerun make mailbox-analyze to resume it."
@@ -209,7 +215,7 @@ stage_list() {
 }
 
 run_analyze() {
-  run_check
+  run_local_check
   ensure_snapshot
   run_export
   open_export_if_requested
@@ -233,7 +239,10 @@ run_clean() {
     return
   fi
 
-  mapfile -t stages < <(stage_list)
+  stages=()
+  while IFS= read -r stage; do
+    [[ -n "$stage" ]] && stages+=("$stage")
+  done < <(stage_list)
   [[ ${#stages[@]} -gt 0 ]] || die "MAILBOX_CLEAN_STAGES did not contain a stage."
   printf '\nReviewed stages: %s\n' "${stages[*]}"
   printf 'Type MOVE_REVIEWED_MAIL_TO_DELETED_ITEMS to resume and complete up to %s reviewed messages: ' "$all_pending"
