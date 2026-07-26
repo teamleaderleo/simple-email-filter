@@ -39,6 +39,64 @@ class GraphClient:
         response.raise_for_status()
         return str(response.json()["id"])
 
+    def iter_folder_message_pages(
+        self,
+        *,
+        folder: str = "inbox",
+        start_url: str | None = None,
+        page_size: int = 500,
+        max_pages: int | None = None,
+        received_after: datetime | None = None,
+        received_before: datetime | None = None,
+    ) -> Iterator[tuple[list[MailMessage], str | None]]:
+        """Yield complete Graph pages and their continuation URL.
+
+        The continuation URL is safe to persist locally and pass back as start_url.
+        Pages are never truncated, which keeps checkpoint resume semantics exact.
+        """
+        url: str | None = start_url or (
+            f"{GRAPH_ROOT}/me/mailFolders/{quote(folder, safe='')}/messages"
+        )
+        params: dict[str, str | int] | None = None
+        if start_url is None:
+            params = {
+                "$top": max(1, min(page_size, 999)),
+                "$orderby": "receivedDateTime desc",
+                "$select": (
+                    "id,subject,from,receivedDateTime,parentFolderId,isRead,categories"
+                ),
+            }
+            filters: list[str] = []
+            if received_after is not None:
+                filters.append(
+                    f"receivedDateTime ge {_graph_timestamp(received_after)}"
+                )
+            if received_before is not None:
+                filters.append(
+                    f"receivedDateTime lt {_graph_timestamp(received_before)}"
+                )
+            if filters:
+                params["$filter"] = " and ".join(filters)
+
+        pages = 0
+        while url:
+            response = self.session.get(url, params=params, timeout=60)
+            response.raise_for_status()
+            payload = response.json()
+            messages = [
+                MailMessage.from_graph(raw_message)
+                for raw_message in payload.get("value", [])
+            ]
+            next_link = payload.get("@odata.nextLink")
+            continuation = str(next_link) if next_link else None
+            yield messages, continuation
+
+            pages += 1
+            if max_pages is not None and pages >= max(1, max_pages):
+                return
+            url = continuation
+            params = None
+
     def iter_messages(
         self,
         *,
@@ -72,16 +130,16 @@ class GraphClient:
             url = str(next_link) if next_link else None
             params = None
 
-    def move_messages(
+    def move_messages_detailed(
         self,
         message_ids: Sequence[str],
         *,
         destination_folder_id: str,
         batch_size: int = 20,
         max_attempts: int = 4,
-    ) -> dict[str, int]:
-        """Move messages in Graph JSON batches and report every result."""
-        result = {"moved": 0, "failed": 0}
+    ) -> dict[str, str]:
+        """Move messages in Graph JSON batches and return an outcome per id."""
+        outcomes: dict[str, str] = {}
         size = max(1, min(batch_size, 20))
 
         for offset in range(0, len(message_ids), size):
@@ -120,11 +178,13 @@ class GraphClient:
                     seen_request_ids.add(request_id)
                     status = int(subresponse.get("status", 0))
                     if status in _SUCCESS_STATUSES:
-                        result["moved"] += 1
+                        outcomes[message_id] = "moved"
+                    elif status == 404:
+                        outcomes[message_id] = "missing"
                     elif status == 429 or 500 <= status < 600:
                         retry_ids.append(message_id)
                     else:
-                        result["failed"] += 1
+                        outcomes[message_id] = "failed"
 
                 retry_ids.extend(
                     message_id
@@ -135,10 +195,29 @@ class GraphClient:
                 if not retry_ids:
                     break
                 if attempt == max_attempts:
-                    result["failed"] += len(retry_ids)
+                    for message_id in retry_ids:
+                        outcomes[message_id] = "failed"
                     break
 
                 pending = retry_ids
                 time.sleep(min(2 ** (attempt - 1), 8))
 
-        return result
+        return outcomes
+
+    def move_messages(
+        self,
+        message_ids: Sequence[str],
+        *,
+        destination_folder_id: str,
+        batch_size: int = 20,
+        max_attempts: int = 4,
+    ) -> dict[str, int]:
+        """Move messages in Graph JSON batches and report aggregate results."""
+        outcomes = self.move_messages_detailed(
+            message_ids,
+            destination_folder_id=destination_folder_id,
+            batch_size=batch_size,
+            max_attempts=max_attempts,
+        )
+        moved = sum(outcome == "moved" for outcome in outcomes.values())
+        return {"moved": moved, "failed": len(outcomes) - moved}
