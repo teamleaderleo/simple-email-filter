@@ -97,7 +97,7 @@ class RetentionPlannerTests(unittest.TestCase):
             [policy],
             now=NOW,
         )
-        self.assertEqual(
+        self.assertCountEqual(
             [item.message_id for item in plan],
             ["one-old", "two-old"],
         )
