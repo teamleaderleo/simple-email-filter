@@ -18,6 +18,7 @@ from email_filter.historical import (
     scan_folder,
 )
 from email_filter.policy import load_policies
+from email_filter.review import build_unmatched_review
 
 load_dotenv()
 
@@ -40,6 +41,13 @@ def _bounded_apply_limit(value: str) -> int:
     parsed = int(value)
     if not 1 <= parsed <= 5000:
         raise argparse.ArgumentTypeError("apply limit must be between 1 and 5000")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
     return parsed
 
 
@@ -80,6 +88,25 @@ def audit(args: argparse.Namespace) -> int:
 def report(args: argparse.Namespace) -> int:
     store = HistoricalMailboxStore(args.state_dir)
     _print(store.summary())
+    return 0
+
+
+def review(args: argparse.Namespace) -> int:
+    store = HistoricalMailboxStore(args.state_dir)
+    summary = store.summary()
+    policy_path = args.policy or str(summary.get("policyPath") or _default_policy())
+    policies = load_policies(policy_path)
+    payload = build_unmatched_review(
+        store.load_messages(),
+        policies,
+        top_senders=args.top,
+        samples_per_sender=args.samples,
+        sender=args.sender,
+        domain=args.domain,
+    )
+    payload["policyPath"] = policy_path
+    payload["stateDir"] = str(Path(args.state_dir))
+    _print(payload)
     return 0
 
 
@@ -143,6 +170,24 @@ def parser() -> argparse.ArgumentParser:
         help="Print the latest local audit summary without contacting Graph.",
     )
     report_parser.set_defaults(handler=report)
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help=(
+            "Inspect unmatched senders and redacted subject patterns from the local "
+            "snapshot without contacting Graph."
+        ),
+    )
+    review_parser.add_argument(
+        "--policy",
+        default=None,
+        help="Policy file to evaluate. Defaults to the policy recorded by the audit.",
+    )
+    review_parser.add_argument("--sender", default=None)
+    review_parser.add_argument("--domain", default=None)
+    review_parser.add_argument("--top", type=_positive_int, default=25)
+    review_parser.add_argument("--samples", type=_positive_int, default=4)
+    review_parser.set_defaults(handler=review)
 
     apply_parser = subparsers.add_parser(
         "apply",

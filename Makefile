@@ -5,7 +5,7 @@ LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-apply mailbox-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-apply mailbox-reset
 
 help:
 	@$(LAMBDA_OPS) help
@@ -44,6 +44,9 @@ mailbox-audit:
 
 mailbox-report:
 	@$(MAILBOX_OPS) report
+
+mailbox-review:
+	@$(MAILBOX_OPS) review
 
 mailbox-apply:
 	@$(MAILBOX_OPS) apply
