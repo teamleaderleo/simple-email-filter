@@ -6,7 +6,7 @@ MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
 MAILBOX_EXPORT := bash scripts/mailbox-export.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-apply mailbox-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply mailbox-reset
 
 help:
 	@$(LAMBDA_OPS) help
@@ -54,6 +54,15 @@ mailbox-review:
 
 mailbox-export:
 	@$(MAILBOX_EXPORT)
+
+mailbox-prepare-apply:
+	@$(MAILBOX_OPS) prepare-apply
+
+mailbox-plan:
+	@$(MAILBOX_OPS) plan
+
+mailbox-apply-stage:
+	@$(MAILBOX_OPS) apply-stage
 
 mailbox-apply:
 	@$(MAILBOX_OPS) apply
