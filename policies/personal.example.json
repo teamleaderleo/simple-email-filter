@@ -1,13 +1,19 @@
 {
   "version": 1,
-  "notes": "Copy this file to a deployment-only location and adjust it. First matching policy wins.",
+  "notes": "Copy this file to a deployment-only location and adjust it. First matching policy wins. Rolling policies may use groupBy=sender so each feed keeps its own latest messages.",
   "policies": [
     {
       "id": "purchase-order-confirmations",
       "description": "Keep order confirmations as a permanent purchase history.",
       "priority": 10,
-      "match": {"senders": ["auto-confirm@amazon.ca"]},
-      "retention": {"mode": "forever"}
+      "match": {
+        "senders": [
+          "auto-confirm@amazon.ca"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "purchase-receipts",
@@ -26,37 +32,113 @@
           "canceled order"
         ]
       },
-      "retention": {"mode": "forever"}
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "crypto-account-records",
       "description": "Keep Crypto.com verification, transfer, deposit and withdrawal history.",
       "priority": 10,
-      "match": {"senders": ["hello@crypto.com"]},
-      "retention": {"mode": "forever"}
+      "match": {
+        "senders": [
+          "hello@crypto.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "brokerage-account-records",
-      "description": "Keep brokerage account mail unless a narrower reviewed policy is added later.",
+      "description": "Keep Interactive Brokers account mail as permanent financial history.",
       "priority": 10,
-      "match": {"senderDomains": ["interactivebrokers.com"]},
-      "retention": {"mode": "forever"}
+      "match": {
+        "senderDomains": [
+          "interactivebrokers.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "financial-account-records",
+      "description": "Keep reviewed banking, brokerage, payment and cryptocurrency account records forever.",
+      "priority": 10,
+      "match": {
+        "senders": [
+          "bmoalerts@bmo.com",
+          "investorline@e-news.bmo.com",
+          "bmo.confirmation@bmo.com",
+          "customersuccess@questrade.com",
+          "support@questrade.com",
+          "no-reply@questrade.com",
+          "newaccounts@questrade.com",
+          "noreply@newton.co",
+          "notifications@mail.shakepay.com",
+          "no-reply@shakepay.com",
+          "newsletter@shakepay.com",
+          "notify@payments.interac.ca",
+          "catch@payments.interac.ca",
+          "service@intl.paypal.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "account-security-records",
+      "description": "Keep reviewed account-access and security notifications forever.",
+      "priority": 10,
+      "match": {
+        "senders": [
+          "no-reply@accounts.google.com",
+          "noreply@github.com",
+          "noreply@email.apple.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "apple-purchase-records",
+      "description": "Keep Apple receipts, subscriptions and AppleCare coverage records forever.",
+      "priority": 10,
+      "match": {
+        "senders": [
+          "no_reply@email.apple.com",
+          "applesupport@email.apple.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "job-application-platform-records",
       "description": "Keep application confirmations and status mail from applicant-tracking platforms.",
       "priority": 12,
       "match": {
-        "senderDomains": ["us.greenhouse-mail.io", "myworkday.com"]
+        "senderDomains": [
+          "us.greenhouse-mail.io",
+          "myworkday.com"
+        ]
       },
-      "retention": {"mode": "forever"}
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "linkedin-job-application-records",
       "description": "Keep LinkedIn application submissions and status updates.",
       "priority": 12,
       "match": {
-        "senders": ["jobs-noreply@linkedin.com"],
+        "senders": [
+          "jobs-noreply@linkedin.com"
+        ],
         "subjectContains": [
           "application",
           "interview",
@@ -65,14 +147,37 @@
           "thanks for applying"
         ]
       },
-      "retention": {"mode": "forever"}
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "reviewed-job-application-records",
+      "description": "Keep reviewed application confirmations, interview notices and status records forever.",
+      "priority": 12,
+      "match": {
+        "senders": [
+          "no-reply@ashbyhq.com",
+          "hiring@ashbyhq.com",
+          "no-reply@hire.lever.co",
+          "mail@hire.lever.co",
+          "noreply@mail.amazon.jobs",
+          "appleworldwiderecruiting@email.apple.com",
+          "hr.notifications@bmo.com"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "uber-security-records",
       "description": "Keep Uber security and account-access notices.",
       "priority": 12,
       "match": {
-        "senders": ["noreply@uber.com"],
+        "senders": [
+          "noreply@uber.com"
+        ],
         "subjectContains": [
           "security alert",
           "new login",
@@ -83,7 +188,68 @@
           "new device"
         ]
       },
-      "retention": {"mode": "forever"}
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "pixiv-security-records",
+      "description": "Keep Pixiv account-access and login notifications forever.",
+      "priority": 12,
+      "match": {
+        "senders": [
+          "no-reply@pixiv.net"
+        ],
+        "subjectContains": [
+          "new login",
+          "login notification",
+          "login detected",
+          "password",
+          "verification",
+          "security alert",
+          "sign-in",
+          "signin"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "paypal-legal-records",
+      "description": "Keep PayPal legal-agreement and policy-change notices forever.",
+      "priority": 12,
+      "match": {
+        "senders": [
+          "paypal@mail.paypal.ca"
+        ],
+        "subjectContains": [
+          "legal agreement",
+          "legal agreements",
+          "policy update",
+          "terms update"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
+    },
+    {
+      "id": "uber-trip-records",
+      "description": "Keep Uber ride and trip records as permanent purchase history.",
+      "priority": 12,
+      "match": {
+        "senders": [
+          "noreply@uber.com"
+        ],
+        "subjectContains": [
+          "trip with uber",
+          "ride with uber"
+        ]
+      },
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "building-records",
@@ -106,14 +272,23 @@
           "water shutoff"
         ]
       },
-      "retention": {"mode": "forever"}
+      "retention": {
+        "mode": "forever"
+      }
     },
     {
       "id": "shipment-tracking",
       "description": "Tracking updates are useful for disputes and returns, then expire.",
       "priority": 20,
-      "match": {"senders": ["shipment-tracking@amazon.ca"]},
-      "retention": {"mode": "days", "days": 180}
+      "match": {
+        "senders": [
+          "shipment-tracking@amazon.ca"
+        ]
+      },
+      "retention": {
+        "mode": "days",
+        "days": 180
+      }
     },
     {
       "id": "building-package-notices",
@@ -131,31 +306,47 @@
           "parcel notification"
         ]
       },
-      "retention": {"mode": "days", "days": 180}
+      "retention": {
+        "mode": "days",
+        "days": 180
+      }
     },
     {
       "id": "artstation-prints",
       "description": "Keep a generous rolling time capsule of print announcements.",
       "priority": 20,
       "match": {
-        "senders": ["notifications@artstation.com"],
-        "subjectContains": ["published a new print"]
+        "senders": [
+          "notifications@artstation.com"
+        ],
+        "subjectContains": [
+          "published a new print"
+        ]
       },
-      "retention": {"mode": "days_and_latest", "days": 365, "keepLatest": 150}
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 365,
+        "keepLatest": 150
+      }
     },
     {
       "id": "uber-order-notifications",
       "description": "Keep Uber Eats order and delivery notices for six months.",
       "priority": 20,
       "match": {
-        "senders": ["noreply@uber.com"],
+        "senders": [
+          "noreply@uber.com"
+        ],
         "subjectContains": [
           "order with uber eats",
           "order delivered",
           "delivery update"
         ]
       },
-      "retention": {"mode": "days", "days": 180}
+      "retention": {
+        "mode": "days",
+        "days": 180
+      }
     },
     {
       "id": "building-announcements",
@@ -168,18 +359,28 @@
           "condo-communities.com"
         ]
       },
-      "retention": {"mode": "days", "days": 365}
+      "retention": {
+        "mode": "days",
+        "days": 365
+      }
     },
     {
       "id": "artstation-digests",
       "description": "Daily digests are enjoyable briefly, then expire.",
       "priority": 30,
-      "match": {"senders": ["notifications@artstation.com"]},
-      "retention": {"mode": "days", "days": 45}
+      "match": {
+        "senders": [
+          "notifications@artstation.com"
+        ]
+      },
+      "retention": {
+        "mode": "days",
+        "days": 45
+      }
     },
     {
       "id": "job-alerts",
-      "description": "Keep a recent rolling selection of job alerts and opportunity digests.",
+      "description": "Keep a recent rolling selection from each reviewed job-alert feed.",
       "priority": 40,
       "match": {
         "senders": [
@@ -190,14 +391,30 @@
           "noreply@glassdoor.com",
           "dice@connect.dice.com",
           "team@80000hours.org",
-          "help@welcometothejungle.com"
+          "help@welcometothejungle.com",
+          "no-reply@talent.com",
+          "alerts@ziprecruiter.com",
+          "swissre-jobnotification@noreply12.jobs2web.com",
+          "deloitte-jobnotification@noreply.jobs2web.com",
+          "scotiabank-jobnotification@noreply17.jobs2web.com",
+          "uoft.careers@noreply17.jobs2web.com",
+          "houghtonmifflinharcourt-jobnotification@noreply.jobs2web.com",
+          "alert@email.nexxt.com",
+          "jfw@email.nexxt.com",
+          "newsletter@email.nexxt.com",
+          "talent@ibm.com"
         ]
       },
-      "retention": {"mode": "days_and_latest", "days": 30, "keepLatest": 25}
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 30,
+        "keepLatest": 25,
+        "groupBy": "sender"
+      }
     },
     {
       "id": "linkedin-social-notifications",
-      "description": "Keep a short rolling history of LinkedIn profile, invitation and company-update notifications.",
+      "description": "Keep a short rolling history from each LinkedIn social-notification feed.",
       "priority": 40,
       "match": {
         "senders": [
@@ -206,21 +423,147 @@
           "updates-noreply@linkedin.com"
         ]
       },
-      "retention": {"mode": "days_and_latest", "days": 90, "keepLatest": 50}
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 90,
+        "keepLatest": 50,
+        "groupBy": "sender"
+      }
     },
     {
       "id": "deployment-alerts",
       "description": "Keep the latest deployment failures long enough to be actionable.",
       "priority": 40,
-      "match": {"senders": ["notifications@vercel.com"]},
-      "retention": {"mode": "days_and_latest", "days": 14, "keepLatest": 20}
+      "match": {
+        "senders": [
+          "notifications@vercel.com"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 14,
+        "keepLatest": 20
+      }
+    },
+    {
+      "id": "career-network-notifications",
+      "description": "Keep a short rolling history from recruiter-network and career-community feeds.",
+      "priority": 45,
+      "match": {
+        "senders": [
+          "support@untapped.io",
+          "marketing@untapped.io",
+          "no-reply@jumpstart.me"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 90,
+        "keepLatest": 25,
+        "groupBy": "sender"
+      }
+    },
+    {
+      "id": "technical-and-cultural-newsletters",
+      "description": "Keep six months and a small recent archive from each reviewed newsletter feed.",
+      "priority": 50,
+      "match": {
+        "senders": [
+          "no-reply@mail.goodreads.com",
+          "bytebytego@substack.com",
+          "therundownai@mail.beehiiv.com",
+          "3w3m@substack.com",
+          "no-reply@m.mail.coursera.org",
+          "no-reply@t.mail.coursera.org",
+          "agoinsider@ago.ca",
+          "enews@ago.ca",
+          "marc@frontendmasters.com",
+          "newsletter@softwareengineeringdaily.com",
+          "contact@moretothat.com",
+          "austinkleon@substack.com",
+          "alifeengineered@substack.com",
+          "hiddenrsrch@substack.com",
+          "newsletters@audible.ca",
+          "no-reply@leetcode.com",
+          "noreply@topcoder.com",
+          "newsletters@marketing.angel.co",
+          "attki@creators.gumroad.com",
+          "pascio@creators.gumroad.com",
+          "superhuman@mail.joinsuperhuman.ai"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 180,
+        "keepLatest": 20,
+        "groupBy": "sender"
+      }
+    },
+    {
+      "id": "short-lived-digests",
+      "description": "Keep a brief rolling sample from high-frequency general-interest digests.",
+      "priority": 55,
+      "match": {
+        "senders": [
+          "digest-noreply@quora.com",
+          "english-personalized-digest@quora.com",
+          "hello@email.bing.com"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 60,
+        "keepLatest": 20,
+        "groupBy": "sender"
+      }
+    },
+    {
+      "id": "entertainment-community-notifications",
+      "description": "Keep six months and a recent sample from entertainment and community feeds.",
+      "priority": 55,
+      "match": {
+        "senders": [
+          "noreply@fantia.jp",
+          "noreply.news@e-mail.hoyoverse.com",
+          "no-reply@pixiv.net",
+          "noreply@steampowered.com",
+          "notification@service.tiktok.com",
+          "newsletter@service.tiktok.com",
+          "no-reply@mail.instagram.com",
+          "hello@breathe.calm.com"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 180,
+        "keepLatest": 30,
+        "groupBy": "sender"
+      }
+    },
+    {
+      "id": "political-campaign-updates",
+      "description": "Keep a short rolling history of campaign and political-event mail.",
+      "priority": 60,
+      "match": {
+        "senders": [
+          "reply@action.liberal.ca"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 90,
+        "keepLatest": 20,
+        "groupBy": "sender"
+      }
     },
     {
       "id": "uber-promotions",
       "description": "Expire Uber membership and discount promotions after a short browsing window.",
       "priority": 70,
       "match": {
-        "senders": ["noreply@uber.com"],
+        "senders": [
+          "noreply@uber.com"
+        ],
         "subjectContains": [
           "save with uber one",
           "months free",
@@ -231,11 +574,50 @@
           "free when you join"
         ]
       },
-      "retention": {"mode": "days", "days": 45}
+      "retention": {
+        "mode": "days",
+        "days": 45
+      }
+    },
+    {
+      "id": "financial-marketing",
+      "description": "Keep a short rolling history of reviewed financial-product marketing and surveys.",
+      "priority": 75,
+      "match": {
+        "senders": [
+          "donotreply@e-news.bmo.com",
+          "paypal@mail.paypal.ca",
+          "noreplyoffersrenewals@bmo.com",
+          "bmo.experience@bmo.com",
+          "feedback@questrade.com"
+        ]
+      },
+      "retention": {
+        "mode": "days_and_latest",
+        "days": 90,
+        "keepLatest": 20,
+        "groupBy": "sender"
+      }
+    },
+    {
+      "id": "amazon-review-requests",
+      "description": "Amazon rating and review requests expire after a short response window.",
+      "priority": 78,
+      "match": {
+        "senders": [
+          "donotreply@amazon.ca",
+          "marketplace-messages@amazon.ca",
+          "customer-reviews-messages@amazon.ca"
+        ]
+      },
+      "retention": {
+        "mode": "days",
+        "days": 45
+      }
     },
     {
       "id": "marketing-promotions",
-      "description": "Known retail and promotional feeds expire after a short browsing window.",
+      "description": "Known retail, restaurant and event promotional feeds expire after a short browsing window.",
       "priority": 80,
       "match": {
         "senders": [
@@ -257,10 +639,44 @@
           "mcdonaldscanada@my.mcdonalds.ca",
           "newsletters@news.ln-cc.com",
           "foolmail@fool.ca",
-          "microsoftstore@microsoftstoreemail.com"
+          "microsoftstore@microsoftstoreemail.com",
+          "email@email.salomon.com",
+          "noreply@email.salomon.com",
+          "ssense@m.ssense.com",
+          "newsletters@ssense.com",
+          "shop@beauty.sephora.com",
+          "support@laline.ca",
+          "communications@sf.letsbewell.ca",
+          "shopbop@shopbop-mail.com",
+          "shopbopmen@shopbop-mail.com",
+          "sobeys@em.sobeys.com",
+          "microsoftstore@microsoftstore.microsoft.com",
+          "communications@e.rexall.ca",
+          "notifications@mail.fanexpohq.com",
+          "nordstrom@eml.nordstrom.com",
+          "starbucks@e.starbucks.com",
+          "customerupdate@mail.ctfs.com",
+          "news@supremenewyork.com",
+          "funhogs@na.patagonia.com",
+          "mcdonaldscanada@e.mcdonalds.ca",
+          "offers@m.myunidays.com",
+          "aw_noreply@aw.ca",
+          "welcome@nandos-canada.contact-mailer.com",
+          "cineplex@campaigns.cineplex.com",
+          "emails@email.sandisk.com",
+          "triangle@email.triangle.com",
+          "news@simplehuman.com",
+          "no-reply.galleria@galleriasm.com",
+          "news@tres-bien.com",
+          "kimy@spocket.co",
+          "support@spocket.co",
+          "rewards@c.pxsmail.com"
         ]
       },
-      "retention": {"mode": "days", "days": 45}
+      "retention": {
+        "mode": "days",
+        "days": 45
+      }
     }
   ]
 }
