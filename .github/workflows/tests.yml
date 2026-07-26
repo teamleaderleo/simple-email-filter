@@ -32,4 +32,4 @@ jobs:
           name: unit-tests-${{ matrix.python-version }}-failure
           path: unit-tests.log
       - run: python -m compileall -q email_filter handlers webhook_handler.py mailbox_cleanup.py mailbox_export.py junk_backfill.py setup_webhook.py setup_token_interactive.py
-      - run: bash -n scripts/email-filter.sh scripts/lambda-deploy.sh scripts/mailbox-cleanup.sh scripts/mailbox-apply-stage-all.sh scripts/mailbox-export.sh scripts/junk-backfill.sh scripts/test.sh
+      - run: bash -n scripts/email-filter.sh scripts/lambda-deploy.sh scripts/mailbox-cleanup.sh scripts/mailbox-apply-stage-all.sh scripts/mailbox-ops.sh scripts/mailbox-export.sh scripts/junk-backfill.sh scripts/test.sh

@@ -1,96 +1,98 @@
 # Historical mailbox cleanup
 
-This workflow is for a large existing Outlook folder, such as an Inbox with tens of thousands of messages. It is separate from the scheduled retention Lambda.
+This workflow handles a large existing Outlook folder, such as an Inbox with tens of thousands of messages. It is separate from the scheduled retention Lambda.
 
-The default command is non-destructive:
+## Normal workflow
 
-```bash
-git switch main
-git pull --ff-only
-make mailbox-audit
-```
-
-## What the audit does
-
-`make mailbox-audit`:
-
-1. checks the existing AWS and Microsoft authentication
-2. scans the Inbox in complete Microsoft Graph pages of up to 999 messages
-3. writes a checkpoint after every page
-4. resumes from the saved Graph continuation URL after interruption
-5. stores a private local snapshot under `.mailbox-cleanup/inbox/`
-6. evaluates the shared retention policies
-7. writes a local plan and summary
-8. moves no messages
-
-The report includes:
-
-- total scanned, read and unread counts
-- matched and unmatched counts
-- messages protected forever
-- messages currently kept by a temporary retention rule
-- messages eligible to move to Deleted Items
-- counts by year and policy
-- the largest senders and domains
-- the largest unmatched senders and domains, which are the best candidates for new rules
-
-Print the latest report without contacting Microsoft:
+Routine use is now three commands:
 
 ```bash
-make mailbox-report
+make mailbox-check
+make mailbox-analyze
+make mailbox-clean
 ```
 
-## Reviewing unmatched mail
+### `make mailbox-check`
 
-Sender names alone are not enough for broad rules. The same sender can carry receipts, security alerts, order updates, recruiter messages, and marketing. Use the private local review command before adding a policy:
+This command:
+
+1. repairs the Python 3.14 virtual environment when needed
+2. verifies AWS and Microsoft authentication
+3. runs unit tests, Python compilation and shell syntax checks
+4. records the tested Git commit under the ignored private state directory
+5. skips the duplicate test run when the same clean commit is checked again
+
+A dirty working tree is always tested and is never recorded as a reusable successful test stamp.
+
+### `make mailbox-analyze`
+
+This command is non-destructive. It:
+
+1. runs the local checks
+2. starts or resumes the Inbox audit only when no complete snapshot exists
+3. reuses a complete snapshot without requiring AWS or Microsoft access
+4. refreshes the privacy-minimised JSON, CSV and Excel package
+5. includes aggregate apply progress when cleanup has already started
+
+The command never rebuilds or replaces an applied plan. When apply results exist, it uses the policy path recorded by that saved plan.
+
+### `make mailbox-clean`
+
+This is the normal reviewed cleanup command. It:
+
+1. runs the cached checks and verifies authentication
+2. creates or resumes the complete local snapshot
+3. creates the ignored private policy only before apply has started
+4. refreshes the analysis package
+5. prints the whole-plan status
+6. asks once for `MOVE_REVIEWED_MAIL_TO_DELETED_ITEMS`
+7. resumes the `bulk`, `newsletters` and `operations` stages
+8. restarts bounded stage passes automatically when work remains
+9. refreshes exports on success, failure or interruption
+
+The command stops on persistent Graph failures, no progress, authentication failure or the configured pass limit. It does not loop without a bound.
+
+Optional private settings may be stored in:
+
+```text
+.mailbox-cleanup/inbox/config.env
+```
+
+Example:
 
 ```bash
-make mailbox-review
+MAILBOX_CLEAN_STAGES=bulk,newsletters,operations
+MAILBOX_CLEAN_MAX_PASSES=20
+MAILBOX_STAGE_RUN_LIMIT=50000
+MAILBOX_GRAPH_WORKERS=4
+MAILBOX_OPEN_EXPORT=1
 ```
 
-It reads the existing local snapshot and does not contact Microsoft. The output includes:
+## What the audit stores
 
-- unmatched counts per sender
-- read and unread counts
-- first and last received dates
-- counts by year
-- redacted subject patterns
-- keyword signals for security, finance, purchase records, delivery, property/legal, job applications, and promotions
-- a manual-review flag when repeated potentially important signals appear
+The audit scans the Inbox in complete Microsoft Graph pages of up to 999 messages, writes a checkpoint after every page and resumes from the saved continuation URL after interruption.
 
-The output does not contain message IDs, bodies, previews or attachments. Obvious email addresses, URLs, long identifiers, UUIDs and numbers in subjects are replaced before display.
+Private state is kept under:
 
-Review a single sender:
-
-```bash
-MAILBOX_REVIEW_SENDER=store-news@amazon.ca make mailbox-review
+```text
+.mailbox-cleanup/inbox/
+├── checkpoint.json
+├── messages.jsonl
+├── plan.jsonl
+├── summary.json
+├── apply-results.jsonl
+├── config.env
+├── .tested-commit
+└── export/
 ```
 
-Review a whole domain:
+The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are required for policy evaluation. It does not contain message bodies, previews or attachments.
 
-```bash
-MAILBOX_REVIEW_DOMAIN=linkedin.com make mailbox-review
-```
+Do not upload `messages.jsonl`, `plan.jsonl` or `apply-results.jsonl`.
 
-Change the number of senders or subject patterns shown:
+## Analysis package
 
-```bash
-MAILBOX_REVIEW_TOP=40 \
-MAILBOX_REVIEW_SAMPLES=8 \
-make mailbox-review
-```
-
-The review command uses the policy path recorded in the latest audit, so unmatched results stay consistent with that plan.
-
-## Exporting an analysis package
-
-Use the export command instead of pasting a large JSON report into chat:
-
-```bash
-make mailbox-export
-```
-
-The export is local-only. It rebuilds the audit plan from the saved snapshot using the current policy file, so policy edits are reflected without another Microsoft Graph scan. It writes:
+The export directory contains:
 
 ```text
 .mailbox-cleanup/inbox/export/
@@ -101,11 +103,13 @@ The export is local-only. It rebuilds the audit plan from the saved snapshot usi
 ├── unmatched-senders.csv
 ├── subject-patterns.csv
 ├── unmatched-review.json
+├── apply-progress.json
+├── apply-progress.csv
 ├── manifest.json
 └── README.txt
 ```
 
-`mailbox-analysis.xlsx` contains these sheets:
+The workbook includes:
 
 - **Overview** — audit totals, policy path and privacy declaration
 - **Policy Impact** — matched, protected, retained and selected counts per policy
@@ -114,173 +118,147 @@ The export is local-only. It rebuilds the audit plan from the saved snapshot usi
 - **Subject Patterns** — redacted patterns grouped by sender
 - **Data Dictionary** — file descriptions and upload guidance
 
-The workbook has frozen headers, filters, sensible column widths and percentage formatting. CSV files use UTF-8 with a byte-order mark so Excel opens sender names and symbols correctly.
+`apply-progress.json` and `apply-progress.csv` report moved, pending, missing and latest-failure counts by stage and policy. They contain no message IDs, senders, subjects, bodies or previews.
 
-The export contains sender addresses, domains, aggregate counts and redacted subject patterns. It contains no message IDs, bodies, previews, attachments or raw subjects. The most useful upload pair is:
+The most useful upload pair remains:
 
 ```text
 mailbox-analysis.xlsx
 mailbox-summary.json
 ```
 
-Change the output path or number of patterns retained per unmatched sender:
+`mailbox-summary.json` now embeds the same aggregate apply-progress object.
+
+## Reviewing unmatched mail
+
+Sender names alone are not enough for broad rules. The same sender can carry receipts, security alerts, order updates, recruiter messages and marketing.
 
 ```bash
-MAILBOX_EXPORT_DIR="$HOME/Desktop/mailbox-analysis" \
-MAILBOX_EXPORT_SAMPLES=8 \
-make mailbox-export
+make mailbox-review
 ```
 
-Export refuses incomplete scans because rolling retention rules require the full folder history. It also refuses to rebuild a plan after message moves have started in that state directory.
+The review reads the saved snapshot and does not contact Microsoft. It includes sender counts, read state, date ranges, yearly counts, redacted subject patterns and repeated safety signals.
 
-## Local files and privacy
-
-The scan state is ignored by Git and written with private file permissions where the operating system supports them:
-
-```text
-.mailbox-cleanup/inbox/
-├── checkpoint.json
-├── messages.jsonl
-├── plan.jsonl
-├── summary.json
-├── export/
-└── apply-results.jsonl
-```
-
-The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are needed to evaluate policies. It does not contain message bodies, previews or attachments. Do not upload `messages.jsonl`, `plan.jsonl` or `apply-results.jsonl`; upload files from the `export/` directory instead.
-
-## Interrupted scans
-
-Run the same command again:
+Focused review remains available:
 
 ```bash
-make mailbox-audit
+MAILBOX_REVIEW_SENDER=store-news@amazon.ca make mailbox-review
+MAILBOX_REVIEW_DOMAIN=linkedin.com make mailbox-review
 ```
 
-The scanner resumes from its last completed page. A crash after writing a page but before updating the checkpoint can duplicate that page in the JSONL file; report generation deduplicates by immutable message ID.
-
-To test with only a few pages while preserving a resumable checkpoint:
-
-```bash
-bash scripts/mailbox-cleanup.sh audit --max-pages 3
-```
-
-Apply mode refuses an incomplete scan because rolling rules such as `keepLatest` require the complete folder history.
-
-## Preparing the reviewed apply plan
-
-The checked-in example policy is intentionally blocked from apply mode. Prepare an ignored private copy and rebuild the plan from the saved snapshot with one command:
-
-```bash
-make mailbox-prepare-apply
-```
-
-This command:
-
-1. creates `policies/personal.json` from the reviewed example when the private file does not exist
-2. leaves an existing private policy untouched
-3. rebuilds `plan.jsonl` and `summary.json` locally without contacting Microsoft Graph
-4. records the private policy path in the summary
-5. prints the default `bulk` stage preview
-
-The private policy is ignored by Git. Edit it directly when personal overrides are needed, then rerun `make mailbox-prepare-apply`.
-
-## Previewing named apply stages
-
-The plan is divided into reviewed groups so tens of thousands of messages do not have to be applied as one undifferentiated operation:
+## Reviewed stages
 
 | Stage | Policies |
 |---|---|
-| `bulk` | retail and restaurant promotions, job alerts, LinkedIn social notifications, ArtStation digests, short-lived digests, Amazon review requests and Uber promotions |
+| `bulk` | promotions, job alerts, LinkedIn social notifications, ArtStation digests, short-lived digests, Amazon review requests and Uber promotions |
 | `newsletters` | reviewed technical and cultural newsletters, entertainment/community feeds, career networks, political updates and financial marketing |
 | `operations` | shipment tracking, Uber Eats orders, building notices and deployment alerts |
-| `all` | every selected policy in the plan |
+| `all` | every selected policy in the saved plan |
 
-Preview the default `bulk` stage without contacting Microsoft:
+The high-level cleanup runs the first three stages by default and reports any selected policy that is not assigned to them.
+
+## Adaptive Microsoft Graph apply
+
+The low-level continuous stage runner remains available:
 
 ```bash
-make mailbox-plan
+make mailbox-apply-stage-all
 ```
 
-Preview another stage:
+Each Microsoft Graph JSON batch contains at most 20 move requests. The runner uses bounded parallel workers and checkpointed chunks.
+
+It handles pressure as follows:
+
+- retries top-level 429 and transient 5xx responses
+- follows Microsoft `Retry-After` values when supplied
+- retries throttled or omitted per-message batch responses
+- saves every successful or missing outcome before continuing
+- reduces workers from the configured ceiling when failures remain
+- reduces checkpoint size after reaching one worker
+- increases checkpoint size and workers again only after repeated clean chunks
+- stops at one worker and the minimum chunk if failures persist
+
+Default limits:
+
+```text
+MAILBOX_STAGE_LIMIT=5000
+MAILBOX_STAGE_RUN_LIMIT=50000 when invoked through make mailbox-clean
+MAILBOX_GRAPH_WORKERS=4
+MAILBOX_MIN_ADAPTIVE_CHUNK=500
+MAILBOX_CLEAN_MAX_PASSES=20
+```
+
+These are safeguards, not targets. The runner ends as soon as the selected stage is complete.
+
+## Low-level troubleshooting
+
+The original commands remain available:
+
+```text
+make mailbox-audit
+make mailbox-report
+make mailbox-review
+make mailbox-export
+make mailbox-prepare-apply
+make mailbox-plan
+make mailbox-apply-stage
+make mailbox-apply-stage-all
+make mailbox-apply
+make mailbox-reset
+```
+
+Preview another stage without contacting Microsoft:
 
 ```bash
 MAILBOX_APPLY_STAGE=newsletters make mailbox-plan
 ```
 
-Select exact policy ids instead of a named stage:
+Select exact policy IDs:
 
 ```bash
 MAILBOX_APPLY_POLICIES=shipment-tracking,uber-order-notifications \
 make mailbox-plan
 ```
 
-The preview reports totals, pending messages, moved messages, messages no longer found, the most recent failed attempts and counts by policy. It also reports pending work across the whole plan.
-
-## Applying a stage
-
-For one bounded chunk:
+Process one bounded chunk:
 
 ```bash
+MAILBOX_APPLY_STAGE=newsletters \
+MAILBOX_STAGE_LIMIT=2000 \
 make mailbox-apply-stage
 ```
 
-The command prints the stage preview and asks for `MOVE_TO_DELETED_ITEMS`. The default chunk size is 5,000 messages.
-
-For a large reviewed stage, confirm once and let the command continue through checkpointed chunks:
-
-```bash
-make mailbox-apply-stage-all
-```
-
-The continuous command defaults to:
-
-- 5,000 messages per checkpointed chunk
-- 30,000 attempted messages per invocation
-- four concurrent Microsoft Graph batch workers
-- one-second spacing between chunks
-
-It stops immediately when the stage finishes, a chunk reports failures, no progress is made, or the total-run cap is reached. Completed and missing outcomes are saved after every chunk, so rerunning the command resumes the same selection.
-
-Use a smaller total cap or lower concurrency when Microsoft throttles requests:
-
-```bash
-MAILBOX_STAGE_RUN_LIMIT=10000 \
-MAILBOX_GRAPH_WORKERS=2 \
-make mailbox-apply-stage-all
-```
-
-Use another stage:
-
-```bash
-MAILBOX_APPLY_STAGE=newsletters make mailbox-apply-stage-all
-```
-
-`MAILBOX_GRAPH_WORKERS` is bounded from 1 through 8. Each Graph request still contains at most 20 message moves; workers run independent batch requests concurrently. A message already moved or no longer found is treated as complete, while failed outcomes remain eligible for retry.
-
-The older `make mailbox-apply` command remains available for the whole plan and uses a 500-message default cap. Named stages are easier to review and track.
-
 All apply commands move mail only to Deleted Items. There is no permanent-delete operation.
+
+## Interrupted work
+
+Audit, export and apply operations are resumable.
+
+- An interrupted audit continues from its last complete Graph page.
+- An interrupted apply skips messages already recorded as moved or missing.
+- Latest failed outcomes remain pending and are retried.
+- `make mailbox-analyze` refreshes the progress package without replacing the plan.
+- `make mailbox-clean` resumes the configured stages from their recorded outcomes.
 
 ## Starting over
 
-The reset command deletes only the private local scan state. It does not change Outlook:
+Reset deletes only the private local scan state. It does not change Outlook:
 
 ```bash
 make mailbox-reset
 ```
 
-It requires the exact confirmation:
+It requires:
 
 ```text
 RESET_LOCAL_STATE
 ```
 
-After any apply run, reset is the deliberate way to build a new snapshot. The audit command will not silently replace a state directory containing apply results.
+After apply has started, reset is the deliberate way to create a different snapshot or policy plan. Audit and export commands will not silently replace the applied plan.
 
 ## Other folders
 
-Inbox is the default. A well-known folder name or Graph folder ID can be supplied:
+Inbox is the default. Use a separate state directory for another folder:
 
 ```bash
 MAILBOX_FOLDER=archive \
@@ -288,8 +266,8 @@ MAILBOX_STATE_DIR=.mailbox-cleanup/archive \
 make mailbox-audit
 ```
 
-Use a separate state directory per folder. Export uses the same state directory and writes its own `export/` child directory.
+The high-level commands are optimised for the default Inbox state. Low-level commands remain the clearer choice for one-off alternate-folder work.
 
 ## Relationship to scheduled retention
 
-Historical cleanup handles the existing backlog locally and in bounded runs. The scheduled retention Lambda handles new mail later in audit-first operation. Both use the same policy parser and planner so retention decisions stay consistent.
+Historical cleanup handles the existing backlog locally and in resumable runs. The scheduled retention Lambda handles new mail later in audit-first operation. Both use the same policy parser and planner so retention decisions remain consistent.

@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from email_filter.analysis_export import export_mailbox_analysis
+from email_filter.apply_progress_export import build_apply_progress, write_apply_progress
 from email_filter.historical import HistoricalMailboxStore, build_audit
 from email_filter.policy import load_policies
 
@@ -70,27 +71,36 @@ def run(args: argparse.Namespace) -> dict:
             "The mailbox scan is incomplete. Finish mailbox-audit before exporting; "
             "rolling retention rules require the complete folder history."
         )
-    if store.apply_results_path.exists():
-        raise RuntimeError(
-            "The saved state already contains move results. Finish or reset that plan "
-            "before rebuilding an analysis export."
-        )
 
     previous_summary = store.summary()
-    policy_path = args.policy or str(
+    recorded_policy_path = str(
         previous_summary.get("policyPath") or _default_policy()
     )
-    policies = load_policies(policy_path)
+    policy_path = args.policy or recorded_policy_path
+    apply_started = store.apply_results_path.exists()
 
-    # Rebuild locally so a changed policy is reflected without another Graph scan.
-    summary = build_audit(
-        store,
-        policies,
-        policy_path=policy_path,
-        top_limit=args.top,
-    )
-    summary["checkpointScanned"] = int(checkpoint.get("scanned", 0))
-    store.write_summary(summary)
+    if apply_started and Path(policy_path) != Path(recorded_policy_path):
+        raise RuntimeError(
+            "Apply has already started, so export must use the policy recorded by the "
+            "saved plan. Reset the local state before changing policies."
+        )
+
+    policies = load_policies(policy_path)
+    if apply_started:
+        # Never rebuild or replace a plan once outcomes have been recorded. The base
+        # analysis still reflects the saved snapshot and policy, while progress
+        # sidecars report moved, pending, missing and retryable counts.
+        summary = previous_summary
+    else:
+        # Rebuild locally so a changed policy is reflected without another Graph scan.
+        summary = build_audit(
+            store,
+            policies,
+            policy_path=policy_path,
+            top_limit=args.top,
+        )
+        summary["checkpointScanned"] = int(checkpoint.get("scanned", 0))
+        store.write_summary(summary)
 
     output_dir = Path(args.output_dir) if args.output_dir else store.root / "export"
     payload = export_mailbox_analysis(
@@ -101,6 +111,17 @@ def run(args: argparse.Namespace) -> dict:
         policy_path=policy_path,
         samples_per_sender=args.samples,
     )
+
+    progress = build_apply_progress(store)
+    progress_files = write_apply_progress(output_dir, progress)
+    payload["files"].update(progress_files)
+    payload["applyProgress"] = {
+        "applyStarted": progress["applyStarted"],
+        "moved": progress["allPlan"]["moved"],
+        "pending": progress["allPlan"]["pending"],
+        "missing": progress["allPlan"]["missing"],
+        "failedLastAttempt": progress["allPlan"]["failedLastAttempt"],
+    }
     payload["stateDir"] = str(store.root)
     return payload
 

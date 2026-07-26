@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+PROVISIONAL_STATE_DIR="${MAILBOX_STATE_DIR:-$ROOT_DIR/.mailbox-cleanup/inbox}"
+CONFIG_FILE="${MAILBOX_CONFIG_FILE:-$PROVISIONAL_STATE_DIR/config.env}"
+if [[ -f "$CONFIG_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  set +a
+fi
+
 AWS_PROFILE="${AWS_PROFILE:-email}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
@@ -18,6 +27,8 @@ STAGE_RUN_LIMIT="${MAILBOX_STAGE_RUN_LIMIT:-30000}"
 GRAPH_WORKERS="${MAILBOX_GRAPH_WORKERS:-4}"
 COOLDOWN_SECONDS="${MAILBOX_GRAPH_COOLDOWN_SECONDS:-20}"
 MIN_ADAPTIVE_CHUNK="${MAILBOX_MIN_ADAPTIVE_CHUNK:-500}"
+SUCCESS_STREAK_TARGET="${MAILBOX_GRAPH_SUCCESS_STREAK:-2}"
+PROVIDED_CONFIRMATION="${MAILBOX_APPLY_CONFIRMATION:-}"
 WEBHOOK_FUNCTION="${WEBHOOK_FUNCTION:-email-webhook-handler}"
 
 note() {
@@ -64,6 +75,7 @@ prepare_auth() {
       || die "Could not recover CLIENT_ID from $WEBHOOK_FUNCTION"
     touch .env
     printf '\nCLIENT_ID=%s\n' "$client_id" >> .env
+    chmod 600 .env 2>/dev/null || true
     note "Added the non-secret Microsoft application client ID to .env"
   fi
 
@@ -116,8 +128,19 @@ result_metrics() {
   .venv/bin/python -c '
 import json, sys
 payload = json.load(sys.stdin)
+diagnostics = payload.get("graphDiagnostics") or {}
+retry_keys = (
+    "topLevelRetries",
+    "retriedMessages",
+    "workerExceptions",
+    "exhaustedRetryMessages",
+    "missingSubresponses",
+)
+retry_pressure = sum(int(diagnostics.get(key, 0)) for key in retry_keys)
 keys = ("requested", "moved", "missing", "failed", "remaining")
-print("\t".join(str(int(payload.get(key, 0))) for key in keys))
+values = [int(payload.get(key, 0)) for key in keys]
+values.append(retry_pressure)
+print("\t".join(str(value) for value in values))
 '
 }
 
@@ -128,6 +151,7 @@ require_integer_between MAILBOX_STAGE_RUN_LIMIT "$STAGE_RUN_LIMIT" 1 50000
 require_integer_between MAILBOX_GRAPH_WORKERS "$GRAPH_WORKERS" 1 8
 require_integer_between MAILBOX_GRAPH_COOLDOWN_SECONDS "$COOLDOWN_SECONDS" 1 120
 require_integer_between MAILBOX_MIN_ADAPTIVE_CHUNK "$MIN_ADAPTIVE_CHUNK" 100 5000
+require_integer_between MAILBOX_GRAPH_SUCCESS_STREAK "$SUCCESS_STREAK_TARGET" 1 10
 (( MIN_ADAPTIVE_CHUNK <= STAGE_LIMIT )) \
   || die "MAILBOX_MIN_ADAPTIVE_CHUNK cannot exceed MAILBOX_STAGE_LIMIT."
 
@@ -142,15 +166,20 @@ fi
 label="$(selection_label)"
 target="$pending"
 (( target > STAGE_RUN_LIMIT )) && target="$STAGE_RUN_LIMIT"
-printf '\nType MOVE_TO_DELETED_ITEMS to process up to %s messages from %s with adaptive checkpointed chunks (starting at %s per chunk and %s workers; %s pending): ' \
-  "$target" "$label" "$STAGE_LIMIT" "$GRAPH_WORKERS" "$pending"
-read -r confirmation
+if [[ -n "$PROVIDED_CONFIRMATION" ]]; then
+  confirmation="$PROVIDED_CONFIRMATION"
+else
+  printf '\nType MOVE_TO_DELETED_ITEMS to process up to %s messages from %s with adaptive checkpointed chunks (starting at %s per chunk and %s workers; %s pending): ' \
+    "$target" "$label" "$STAGE_LIMIT" "$GRAPH_WORKERS" "$pending"
+  read -r confirmation
+fi
 [[ "$confirmation" == "MOVE_TO_DELETED_ITEMS" ]] \
   || die "Apply cancelled. No messages were moved."
 
 attempted=0
 current_workers="$GRAPH_WORKERS"
 current_chunk="$STAGE_LIMIT"
+stable_chunks=0
 
 while (( attempted < STAGE_RUN_LIMIT )); do
   current="$(plan_json)"
@@ -181,7 +210,7 @@ while (( attempted < STAGE_RUN_LIMIT )); do
   if ! metrics="$(printf '%s' "$result" | result_metrics 2>/dev/null)"; then
     die "The apply command failed before returning a structured result. The saved plan and prior outcomes remain resumable."
   fi
-  IFS=$'\t' read -r requested moved missing failed remaining <<< "$metrics"
+  IFS=$'\t' read -r requested moved missing failed remaining retry_pressure <<< "$metrics"
 
   attempted=$((attempted + requested))
   progressed=$((moved + missing))
@@ -192,6 +221,7 @@ while (( attempted < STAGE_RUN_LIMIT )); do
   fi
 
   if (( failed > 0 )); then
+    stable_chunks=0
     if (( current_workers > 1 )); then
       next_workers=$((current_workers / 2))
       (( next_workers < 1 )) && next_workers=1
@@ -214,7 +244,26 @@ while (( attempted < STAGE_RUN_LIMIT )); do
   (( requested > 0 && progressed > 0 )) \
     || die "The continuous apply made no progress and stopped to avoid an endless loop."
 
-  sleep 1
+  if (( retry_pressure > 0 )); then
+    stable_chunks=0
+    note "Microsoft throttled or retried $retry_pressure operations internally; keeping current pressure for the next chunk."
+    sleep 2
+  else
+    stable_chunks=$((stable_chunks + 1))
+    if (( stable_chunks >= SUCCESS_STREAK_TARGET )); then
+      if (( current_chunk < STAGE_LIMIT )); then
+        next_chunk=$((current_chunk * 2))
+        (( next_chunk > STAGE_LIMIT )) && next_chunk="$STAGE_LIMIT"
+        current_chunk="$next_chunk"
+        note "Two clean chunks completed; increasing the checkpoint chunk to $current_chunk."
+      elif (( current_workers < GRAPH_WORKERS )); then
+        current_workers=$((current_workers + 1))
+        note "Two clean chunks completed; increasing Graph workers to $current_workers."
+      fi
+      stable_chunks=0
+    fi
+    sleep 1
+  fi
 done
 
-note "Stopped at MAILBOX_STAGE_RUN_LIMIT=$STAGE_RUN_LIMIT with work still pending. Rerun make mailbox-apply-stage-all to continue."
+note "Stopped at MAILBOX_STAGE_RUN_LIMIT=$STAGE_RUN_LIMIT with work still pending. The one-command cleanup runner will start another resumable pass automatically."

@@ -29,6 +29,7 @@ bash -n \
   scripts/lambda-deploy.sh \
   scripts/mailbox-cleanup.sh \
   scripts/mailbox-apply-stage-all.sh \
+  scripts/mailbox-ops.sh \
   scripts/mailbox-export.sh \
   scripts/junk-backfill.sh \
   scripts/test.sh

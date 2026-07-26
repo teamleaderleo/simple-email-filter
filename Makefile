@@ -4,13 +4,16 @@ OPS := bash scripts/email-filter.sh
 LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
 MAILBOX_CONTINUOUS := bash scripts/mailbox-apply-stage-all.sh
+MAILBOX_HIGH_LEVEL := bash scripts/mailbox-ops.sh
 MAILBOX_EXPORT := bash scripts/mailbox-export.sh
 JUNK_BACKFILL := bash scripts/junk-backfill.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply-stage-all mailbox-apply mailbox-reset junk-backfill-audit junk-backfill-report junk-backfill-apply junk-backfill-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-check mailbox-analyze mailbox-clean mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply-stage-all mailbox-apply mailbox-reset junk-backfill-audit junk-backfill-report junk-backfill-apply junk-backfill-reset
 
 help:
+	@$(MAILBOX_HIGH_LEVEL) help
+	@echo
 	@$(LAMBDA_OPS) help
 	@echo
 	@$(MAILBOX_OPS) help
@@ -46,6 +49,15 @@ upgrade-runtime:
 
 logs-webhook:
 	@$(OPS) logs-webhook
+
+mailbox-check:
+	@$(MAILBOX_HIGH_LEVEL) check
+
+mailbox-analyze:
+	@$(MAILBOX_HIGH_LEVEL) analyze
+
+mailbox-clean:
+	@$(MAILBOX_HIGH_LEVEL) clean
 
 mailbox-audit:
 	@$(MAILBOX_OPS) audit
