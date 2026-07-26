@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -61,6 +62,7 @@ class GraphClient:
         )
 
     def _set_access_token(self, access_token: str) -> None:
+        self.access_token = access_token
         self.session.headers.update({"Authorization": f"Bearer {access_token}"})
 
     def _request(self, method: str, url: str, **kwargs: Any) -> Any:
@@ -182,6 +184,93 @@ class GraphClient:
             url = str(next_link) if next_link else None
             params = None
 
+    def _move_message_batch(
+        self,
+        message_ids: Sequence[str],
+        *,
+        destination_folder_id: str,
+        max_attempts: int,
+    ) -> dict[str, str]:
+        pending = list(message_ids)
+        outcomes: dict[str, str] = {}
+
+        for attempt in range(1, max_attempts + 1):
+            requests_payload = [
+                {
+                    "id": str(index),
+                    "method": "POST",
+                    "url": f"/me/messages/{quote(message_id, safe='')}/move",
+                    "headers": {"Content-Type": "application/json"},
+                    "body": {"destinationId": destination_folder_id},
+                }
+                for index, message_id in enumerate(pending)
+            ]
+            response = self._request(
+                "post",
+                f"{GRAPH_ROOT}/$batch",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps({"requests": requests_payload}),
+                timeout=90,
+            )
+            subresponses = response.json().get("responses", [])
+
+            retry_ids: list[str] = []
+            by_request_id = {
+                str(index): message_id
+                for index, message_id in enumerate(pending)
+            }
+            seen_request_ids: set[str] = set()
+            for subresponse in subresponses:
+                request_id = str(subresponse.get("id"))
+                message_id = by_request_id.get(request_id)
+                if not message_id:
+                    continue
+                seen_request_ids.add(request_id)
+                status = int(subresponse.get("status", 0))
+                if status in _SUCCESS_STATUSES:
+                    outcomes[message_id] = "moved"
+                elif status == 404:
+                    outcomes[message_id] = "missing"
+                elif status == 429 or 500 <= status < 600:
+                    retry_ids.append(message_id)
+                else:
+                    outcomes[message_id] = "failed"
+
+            retry_ids.extend(
+                message_id
+                for request_id, message_id in by_request_id.items()
+                if request_id not in seen_request_ids
+            )
+
+            if not retry_ids:
+                break
+            if attempt == max_attempts:
+                for message_id in retry_ids:
+                    outcomes[message_id] = "failed"
+                break
+
+            pending = retry_ids
+            time.sleep(min(2 ** (attempt - 1), 8))
+
+        return outcomes
+
+    def _parallel_move_batch(
+        self,
+        message_ids: Sequence[str],
+        *,
+        destination_folder_id: str,
+        max_attempts: int,
+    ) -> dict[str, str]:
+        worker = GraphClient(
+            self.access_token,
+            token_refresher=self.token_refresher,
+        )
+        return worker._move_message_batch(
+            message_ids,
+            destination_folder_id=destination_folder_id,
+            max_attempts=max_attempts,
+        )
+
     def move_messages_detailed(
         self,
         message_ids: Sequence[str],
@@ -189,70 +278,49 @@ class GraphClient:
         destination_folder_id: str,
         batch_size: int = 20,
         max_attempts: int = 4,
+        max_workers: int = 1,
     ) -> dict[str, str]:
-        """Move messages in Graph JSON batches and return an outcome per id."""
-        outcomes: dict[str, str] = {}
+        """Move messages in Graph JSON batches and return an outcome per id.
+
+        A Graph JSON batch contains at most 20 move requests. ``max_workers`` controls
+        how many independent batch requests may run concurrently and is bounded to
+        eight to limit throttling pressure.
+        """
         size = max(1, min(batch_size, 20))
+        chunks = [
+            list(message_ids[offset : offset + size])
+            for offset in range(0, len(message_ids), size)
+        ]
+        workers = max(1, min(max_workers, 8, len(chunks) or 1))
+        outcomes: dict[str, str] = {}
 
-        for offset in range(0, len(message_ids), size):
-            pending = list(message_ids[offset : offset + size])
-
-            for attempt in range(1, max_attempts + 1):
-                requests_payload = [
-                    {
-                        "id": str(index),
-                        "method": "POST",
-                        "url": f"/me/messages/{quote(message_id, safe='')}/move",
-                        "headers": {"Content-Type": "application/json"},
-                        "body": {"destinationId": destination_folder_id},
-                    }
-                    for index, message_id in enumerate(pending)
-                ]
-                response = self._request(
-                    "post",
-                    f"{GRAPH_ROOT}/$batch",
-                    headers={"Content-Type": "application/json"},
-                    data=json.dumps({"requests": requests_payload}),
-                    timeout=90,
+        if workers == 1:
+            for chunk in chunks:
+                outcomes.update(
+                    self._move_message_batch(
+                        chunk,
+                        destination_folder_id=destination_folder_id,
+                        max_attempts=max_attempts,
+                    )
                 )
-                subresponses = response.json().get("responses", [])
+            return outcomes
 
-                retry_ids: list[str] = []
-                by_request_id = {
-                    str(i): message_id for i, message_id in enumerate(pending)
-                }
-                seen_request_ids: set[str] = set()
-                for subresponse in subresponses:
-                    request_id = str(subresponse.get("id"))
-                    message_id = by_request_id.get(request_id)
-                    if not message_id:
-                        continue
-                    seen_request_ids.add(request_id)
-                    status = int(subresponse.get("status", 0))
-                    if status in _SUCCESS_STATUSES:
-                        outcomes[message_id] = "moved"
-                    elif status == 404:
-                        outcomes[message_id] = "missing"
-                    elif status == 429 or 500 <= status < 600:
-                        retry_ids.append(message_id)
-                    else:
-                        outcomes[message_id] = "failed"
-
-                retry_ids.extend(
-                    message_id
-                    for request_id, message_id in by_request_id.items()
-                    if request_id not in seen_request_ids
-                )
-
-                if not retry_ids:
-                    break
-                if attempt == max_attempts:
-                    for message_id in retry_ids:
-                        outcomes[message_id] = "failed"
-                    break
-
-                pending = retry_ids
-                time.sleep(min(2 ** (attempt - 1), 8))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    self._parallel_move_batch,
+                    chunk,
+                    destination_folder_id=destination_folder_id,
+                    max_attempts=max_attempts,
+                ): chunk
+                for chunk in chunks
+            }
+            for future in as_completed(futures):
+                chunk = futures[future]
+                try:
+                    outcomes.update(future.result())
+                except Exception:
+                    outcomes.update({message_id: "failed" for message_id in chunk})
 
         return outcomes
 
@@ -263,6 +331,7 @@ class GraphClient:
         destination_folder_id: str,
         batch_size: int = 20,
         max_attempts: int = 4,
+        max_workers: int = 1,
     ) -> dict[str, int]:
         """Move messages in Graph JSON batches and report aggregate results."""
         outcomes = self.move_messages_detailed(
@@ -270,6 +339,7 @@ class GraphClient:
             destination_folder_id=destination_folder_id,
             batch_size=batch_size,
             max_attempts=max_attempts,
+            max_workers=max_workers,
         )
         moved = sum(outcome == "moved" for outcome in outcomes.values())
         return {"moved": moved, "failed": len(outcomes) - moved}
