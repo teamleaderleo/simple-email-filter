@@ -3,7 +3,7 @@
 A personal Outlook automation project with three related jobs:
 
 - **Junk Guard** processes messages Outlook has already placed in Junk. It uses conservative deterministic checks and a Cloudflare Workers AI fallback, keeping uncertain mail.
-- **Historical Cleanup** audits a large existing folder, checkpoints every page, reports retention candidates, and can move a bounded reviewed batch to Deleted Items.
+- **Historical Cleanup** audits a large existing folder, checkpoints every page, reports retention candidates, and can move reviewed policy stages to Deleted Items in resumable batches.
 - **Mailbox Retention** lets ordinary mail arrive normally, then identifies categories that may be moved to Deleted Items after an explicit retention period. Retention currently defaults to audit mode.
 
 ## Routine operations
@@ -36,26 +36,43 @@ Create a compact analysis package instead of pasting a large report into chat:
 make mailbox-export
 ```
 
-The export re-evaluates the saved snapshot against the current policy without contacting Microsoft. It writes aggregate JSON, flat CSV files and a multi-sheet Excel workbook under `.mailbox-cleanup/inbox/export/`. The uploadable files contain sender addresses and redacted subject patterns, but no message IDs, bodies, previews, attachments or raw subjects. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
+The export re-evaluates the saved snapshot against the current policy without contacting Microsoft. It writes aggregate JSON, flat CSV files and a multi-sheet Excel workbook under `.mailbox-cleanup/inbox/export/`. The uploadable files contain sender addresses and redacted subject patterns, but no message IDs, bodies, previews, attachments or raw subjects.
+
+After the policy review is complete, prepare the ignored private policy and preview the default staged cleanup:
+
+```bash
+make mailbox-prepare-apply
+```
+
+Then apply the selected stage in resumable batches of up to 5,000 messages:
+
+```bash
+make mailbox-apply-stage
+```
+
+Named stages separate high-volume bulk mail, reviewed newsletters, and operational notifications. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
 
 Useful commands:
 
 ```text
-make bootstrap        Create the Python 3.14 development environment
-make doctor           Check AWS login, resources and Lambda configuration
-make test             Run tests and syntax checks
-make deploy-webhook   Perform the complete safe webhook update
-make setup-webhook    Recreate only the Microsoft Graph subscription
-make microsoft-login  Force a Microsoft browser login
-make status           Show deployment status without secrets
-make logs-webhook     Follow webhook logs
-make upgrade-runtime  Upgrade both email Lambdas to Python 3.14
-make mailbox-audit    Scan/resume Inbox and build a non-destructive report
-make mailbox-report   Print the latest local mailbox report
-make mailbox-review   Inspect unmatched senders and redacted subject patterns
-make mailbox-export   Build uploadable JSON, CSV and Excel analysis files
-make mailbox-apply    Move a bounded reviewed batch to Deleted Items
-make mailbox-reset    Delete only the private local cleanup state
+make bootstrap              Create the Python 3.14 development environment
+make doctor                 Check AWS login, resources and Lambda configuration
+make test                   Run tests and syntax checks
+make deploy-webhook         Perform the complete safe webhook update
+make setup-webhook          Recreate only the Microsoft Graph subscription
+make microsoft-login        Force a Microsoft browser login
+make status                 Show deployment status without secrets
+make logs-webhook           Follow webhook logs
+make upgrade-runtime        Upgrade both email Lambdas to Python 3.14
+make mailbox-audit          Scan/resume Inbox and build a non-destructive report
+make mailbox-report         Print the latest local mailbox report
+make mailbox-review         Inspect unmatched senders and redacted subject patterns
+make mailbox-export         Build uploadable JSON, CSV and Excel analysis files
+make mailbox-prepare-apply  Create the private policy and rebuild the local plan
+make mailbox-plan           Preview a named stage or exact policy selection
+make mailbox-apply-stage    Move up to 5,000 messages from one reviewed stage
+make mailbox-apply          Legacy whole-plan bounded apply
+make mailbox-reset          Delete only the private local cleanup state
 ```
 
 See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubleshooting.
@@ -69,7 +86,8 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Historical cleanup review mode is local-only and redacts obvious subject identifiers.
 - Historical cleanup exports contain aggregate sender data and redacted subject patterns, not raw message-level content.
 - Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
-- Historical cleanup applies at most 500 messages per run unless explicitly overridden.
+- Named apply stages print exact pending counts before asking for confirmation.
+- Staged apply moves at most 5,000 messages per run and resumes from recorded outcomes.
 - The retention service defaults to audit mode.
 - Retention apply mode requires an explicit confirmation value.
 - The retention Graph client exposes moves to Deleted Items, not permanent deletion.
@@ -86,7 +104,7 @@ scripts/email-filter.sh       local authentication and AWS operations
 scripts/lambda-deploy.sh      cached Lambda packaging and deployment
 scripts/mailbox-cleanup.sh    resumable historical mailbox operations
 scripts/mailbox-export.sh     uploadable mailbox analysis package
-mailbox_cleanup.py            historical audit/report/review/apply CLI
+mailbox_cleanup.py            historical audit/report/review/plan/apply CLI
 mailbox_export.py             local JSON/CSV/XLSX export CLI
 webhook_handler.py            deployed Junk Guard webhook
 setup_webhook.py              secured Graph subscription setup
@@ -116,4 +134,4 @@ The webhook package is built inside the official Python Docker image for the dep
 
 ## Current roadmap
 
-The historical audit, review and analysis export now handle the existing backlog locally. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The historical audit, review, analysis export and staged apply workflow now handle the existing backlog locally. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.

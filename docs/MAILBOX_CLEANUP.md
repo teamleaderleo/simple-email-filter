@@ -167,43 +167,89 @@ bash scripts/mailbox-cleanup.sh audit --max-pages 3
 
 Apply mode refuses an incomplete scan because rolling rules such as `keepLatest` require the complete folder history.
 
-## Reviewing and applying
+## Preparing the reviewed apply plan
 
-The checked-in example policy is safe for audit but intentionally blocked from apply mode. Copy it to the ignored private path and review it:
-
-```bash
-cp policies/personal.example.json policies/personal.json
-```
-
-Then edit the private policy and rebuild the report or export:
+The checked-in example policy is intentionally blocked from apply mode. Prepare an ignored private copy and rebuild the plan from the saved snapshot with one command:
 
 ```bash
-MAILBOX_POLICY_PATH=policies/personal.json make mailbox-export
+make mailbox-prepare-apply
 ```
 
-When the summary and unmatched review look correct:
+This command:
+
+1. creates `policies/personal.json` from the reviewed example when the private file does not exist
+2. leaves an existing private policy untouched
+3. rebuilds `plan.jsonl` and `summary.json` locally without contacting Microsoft Graph
+4. records the private policy path in the summary
+5. prints the default `bulk` stage preview
+
+The private policy is ignored by Git. Edit it directly when personal overrides are needed, then rerun `make mailbox-prepare-apply`.
+
+## Previewing named apply stages
+
+The plan is divided into reviewed groups so tens of thousands of messages do not have to be applied as one undifferentiated operation:
+
+| Stage | Policies |
+|---|---|
+| `bulk` | retail and restaurant promotions, job alerts, LinkedIn social notifications, ArtStation digests, short-lived digests, Amazon review requests and Uber promotions |
+| `newsletters` | reviewed technical and cultural newsletters, entertainment/community feeds, career networks, political updates and financial marketing |
+| `operations` | shipment tracking, Uber Eats orders, building notices and deployment alerts |
+| `all` | every selected policy in the plan |
+
+Preview the default `bulk` stage without contacting Microsoft:
 
 ```bash
-MAILBOX_POLICY_PATH=policies/personal.json make mailbox-apply
+make mailbox-plan
 ```
 
-The command asks you to type:
+Preview another stage:
+
+```bash
+MAILBOX_APPLY_STAGE=newsletters make mailbox-plan
+```
+
+Select exact policy ids instead of a named stage:
+
+```bash
+MAILBOX_APPLY_POLICIES=shipment-tracking,uber-order-notifications \
+make mailbox-plan
+```
+
+The preview reports totals, pending messages, moved messages, messages no longer found, the most recent failed attempts and counts by policy. It also reports pending work across the whole plan.
+
+## Applying a stage
+
+After reviewing the preview:
+
+```bash
+make mailbox-apply-stage
+```
+
+The command prints the same stage preview and asks you to type:
 
 ```text
 MOVE_TO_DELETED_ITEMS
 ```
 
-Each run moves at most 500 planned messages by default. It records an outcome for every message and resumes on the next run. Messages are moved to Deleted Items; there is no permanent-delete operation.
+A staged run moves at most 5,000 messages by default. It records an outcome for every message, retries earlier failures on a later run and resumes the same selection when the command is repeated. A message already moved or no longer found is treated as complete.
 
-Change the batch cap for one run:
+Continue the selected stage by rerunning the same command:
 
 ```bash
-MAILBOX_POLICY_PATH=policies/personal.json \
-MAILBOX_APPLY_LIMIT=1000 \
-make mailbox-apply
+make mailbox-apply-stage
 ```
 
-A failed message is eligible for retry on a later run. A message already moved or no longer found is treated as complete so the plan continues.
+Change the stage or batch cap for one run:
+
+```bash
+MAILBOX_APPLY_STAGE=newsletters \
+MAILBOX_STAGE_LIMIT=2000 \
+make mailbox-apply-stage
+```
+
+The older `make mailbox-apply` command remains available for the whole plan and uses a 500-message default cap. Named stages are easier to review and track.
+
+All apply commands move mail only to Deleted Items. There is no permanent-delete operation.
 
 ## Starting over
 
