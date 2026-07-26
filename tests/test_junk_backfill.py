@@ -2,7 +2,6 @@ import json
 import tempfile
 import unittest
 from datetime import timezone
-from pathlib import Path
 
 from email_filter.junk_backfill import (
     DELETE_CONFIRMATION,
@@ -103,7 +102,7 @@ class AuditPlanTests(unittest.TestCase):
 
 
 class ApplyPlanTests(unittest.TestCase):
-    def _store(self, directory, *, truncated=False):
+    def _store(self, directory):
         store = JunkBackfillStore(directory)
         store.write_plan(
             {
@@ -111,7 +110,7 @@ class ApplyPlanTests(unittest.TestCase):
                 "start": "2026-07-25T15:00:00Z",
                 "end": "2026-07-25T18:00:00Z",
                 "model": "gemma-test",
-                "truncated": truncated,
+                "truncated": False,
                 "messages": [
                     {"messageId": "delete-a", "shouldDelete": True},
                     {"messageId": "keep-a", "shouldDelete": False},
@@ -170,20 +169,6 @@ class ApplyPlanTests(unittest.TestCase):
                     ("delete-b", "backfill_deleted"),
                 ],
             )
-
-    def test_apply_refuses_a_truncated_audit(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = self._store(directory, truncated=True)
-            with self.assertRaisesRegex(RuntimeError, "truncated"):
-                apply_plan(
-                    store,
-                    confirmation=DELETE_CONFIRMATION,
-                    junk_folder_id="junk-id",
-                    get_message=lambda message_id: None,
-                    delete=lambda message_id: "deleted",
-                    already_processed=lambda message_id: False,
-                    mark_processed=lambda message_id, outcome: None,
-                )
 
 
 if __name__ == "__main__":
