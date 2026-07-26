@@ -32,6 +32,27 @@ class FakeSession:
         return self.responses.pop(0)
 
 
+class FakeParallelGraphClient(GraphClient):
+    def __init__(self, *, failing_chunk_first_id=None):
+        self.access_token = "token"
+        self.token_refresher = lambda: "refreshed"
+        self.parallel_chunks = []
+        self.failing_chunk_first_id = failing_chunk_first_id
+
+    def _parallel_move_batch(
+        self,
+        message_ids,
+        *,
+        destination_folder_id,
+        max_attempts,
+    ):
+        chunk = list(message_ids)
+        self.parallel_chunks.append(chunk)
+        if chunk and chunk[0] == self.failing_chunk_first_id:
+            raise RuntimeError("simulated batch failure")
+        return {message_id: "moved" for message_id in chunk}
+
+
 class GraphPageTests(unittest.TestCase):
     def test_folder_pages_return_continuation_without_truncation(self):
         session = FakeSession(
@@ -132,6 +153,40 @@ class GraphBatchTests(unittest.TestCase):
             outcomes,
             {"moved": "moved", "missing": "missing", "failed": "failed"},
         )
+
+    def test_parallel_workers_split_graph_batches_at_twenty(self):
+        client = FakeParallelGraphClient()
+        message_ids = [f"message-{index}" for index in range(45)]
+        outcomes = client.move_messages_detailed(
+            message_ids,
+            destination_folder_id="deleted",
+            max_workers=4,
+        )
+        self.assertEqual(len(outcomes), 45)
+        self.assertEqual(
+            sorted(len(chunk) for chunk in client.parallel_chunks),
+            [5, 20, 20],
+        )
+        self.assertTrue(all(outcome == "moved" for outcome in outcomes.values()))
+
+    def test_parallel_worker_failure_is_bounded_to_its_batch(self):
+        client = FakeParallelGraphClient(failing_chunk_first_id="message-20")
+        message_ids = [f"message-{index}" for index in range(45)]
+        outcomes = client.move_messages_detailed(
+            message_ids,
+            destination_folder_id="deleted",
+            max_workers=4,
+        )
+        failed = sorted(
+            message_id
+            for message_id, outcome in outcomes.items()
+            if outcome == "failed"
+        )
+        self.assertEqual(
+            failed,
+            sorted(f"message-{index}" for index in range(20, 40)),
+        )
+        self.assertEqual(sum(outcome == "moved" for outcome in outcomes.values()), 25)
 
 
 if __name__ == "__main__":
