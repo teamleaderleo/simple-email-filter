@@ -3,6 +3,7 @@ SHELL := /bin/bash
 OPS := bash scripts/email-filter.sh
 LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
+TEST_OPS := bash scripts/test.sh
 
 .PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-apply mailbox-reset
 
@@ -18,7 +19,7 @@ doctor:
 	@$(OPS) doctor
 
 test:
-	@$(OPS) test
+	@$(TEST_OPS)
 
 status:
 	@$(OPS) status
