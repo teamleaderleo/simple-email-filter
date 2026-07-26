@@ -7,8 +7,13 @@ AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 
 
-def acquire_access_token() -> str:
-    """Acquire a Graph token from an override or the existing DynamoDB cache."""
+def acquire_access_token(*, force_refresh: bool = False) -> str:
+    """Acquire a Graph token from an override or the existing DynamoDB cache.
+
+    ``force_refresh`` bypasses a still-cached access token and asks MSAL to use the
+    refresh token. This is used once after Microsoft Graph rejects a request with
+    HTTP 401.
+    """
     override = os.environ.get("MICROSOFT_GRAPH_ACCESS_TOKEN")
     if override:
         return override
@@ -41,10 +46,21 @@ def acquire_access_token() -> str:
             "No cached Microsoft account. Run setup_token_interactive.py locally."
         )
 
-    result = app.acquire_token_silent(SCOPES, account=accounts[0])
+    result = app.acquire_token_silent(
+        SCOPES,
+        account=accounts[0],
+        force_refresh=force_refresh,
+    )
     if not result or "access_token" not in result:
+        description = ""
+        if isinstance(result, dict):
+            description = str(
+                result.get("error_description") or result.get("error") or ""
+            ).strip()
+        suffix = f" Microsoft reported: {description}" if description else ""
         raise RuntimeError(
             "Microsoft token refresh failed. Run setup_token_interactive.py locally."
+            + suffix
         )
 
     if cache.has_state_changed:
