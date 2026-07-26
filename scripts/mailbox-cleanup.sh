@@ -20,6 +20,8 @@ APPLY_LIMIT="${MAILBOX_APPLY_LIMIT:-500}"
 APPLY_STAGE="${MAILBOX_APPLY_STAGE:-bulk}"
 APPLY_POLICIES="${MAILBOX_APPLY_POLICIES:-}"
 STAGE_LIMIT="${MAILBOX_STAGE_LIMIT:-5000}"
+STAGE_RUN_LIMIT="${MAILBOX_STAGE_RUN_LIMIT:-30000}"
+GRAPH_WORKERS="${MAILBOX_GRAPH_WORKERS:-4}"
 REVIEW_SENDER="${MAILBOX_REVIEW_SENDER:-}"
 REVIEW_DOMAIN="${MAILBOX_REVIEW_DOMAIN:-}"
 REVIEW_TOP="${MAILBOX_REVIEW_TOP:-25}"
@@ -37,6 +39,14 @@ die() {
 
 aws_cmd() {
   aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"
+}
+
+require_integer_between() {
+  local label="$1" value="$2" minimum="$3" maximum="$4"
+  [[ "$value" =~ ^[0-9]+$ ]] \
+    || die "$label must be an integer between $minimum and $maximum."
+  (( value >= minimum && value <= maximum )) \
+    || die "$label must be between $minimum and $maximum."
 }
 
 ensure_local_python() {
@@ -88,6 +98,26 @@ selection_args() {
   else
     SELECTION_ARGS+=(--stage "$APPLY_STAGE")
   fi
+}
+
+selection_label() {
+  if [[ -n "$APPLY_POLICIES" ]]; then
+    printf '%s' "$APPLY_POLICIES"
+  else
+    printf '%s' "$APPLY_STAGE"
+  fi
+}
+
+plan_json() {
+  .venv/bin/python mailbox_cleanup.py \
+    --state-dir "$STATE_DIR" \
+    plan \
+    "${SELECTION_ARGS[@]}"
+}
+
+json_value() {
+  local expression="$1"
+  .venv/bin/python -c "import json,sys; print($expression)"
 }
 
 run_audit() {
@@ -170,32 +200,27 @@ run_plan() {
   ensure_local_python
   selection_args
   note "Previewing the reviewed apply selection; Microsoft is not contacted"
-  .venv/bin/python mailbox_cleanup.py \
-    --state-dir "$STATE_DIR" \
-    plan \
-    "${SELECTION_ARGS[@]}"
+  plan_json
 }
 
 run_apply_stage() {
   prepare_auth
   selection_args
+  require_integer_between MAILBOX_STAGE_LIMIT "$STAGE_LIMIT" 1 5000
+  require_integer_between MAILBOX_GRAPH_WORKERS "$GRAPH_WORKERS" 1 8
 
-  local plan_json pending selection_label
-  plan_json="$(.venv/bin/python mailbox_cleanup.py \
-    --state-dir "$STATE_DIR" \
-    plan \
-    "${SELECTION_ARGS[@]}")"
-  printf '%s\n' "$plan_json"
-  pending="$(printf '%s' "$plan_json" | .venv/bin/python -c 'import json,sys; print(json.load(sys.stdin)["selection"]["pending"])')"
+  local preview pending label
+  preview="$(plan_json)"
+  printf '%s\n' "$preview"
+  pending="$(printf '%s' "$preview" | json_value 'json.load(sys.stdin)["selection"]["pending"]')"
   if [[ "$pending" == "0" ]]; then
     note "This apply selection is already complete"
     return
   fi
 
-  selection_label="$APPLY_STAGE"
-  [[ -z "$APPLY_POLICIES" ]] || selection_label="$APPLY_POLICIES"
-  printf '\nType MOVE_TO_DELETED_ITEMS to move up to %s messages from %s (%s pending): ' \
-    "$STAGE_LIMIT" "$selection_label" "$pending"
+  label="$(selection_label)"
+  printf '\nType MOVE_TO_DELETED_ITEMS to move up to %s messages from %s using %s workers (%s pending): ' \
+    "$STAGE_LIMIT" "$label" "$GRAPH_WORKERS" "$pending"
   read -r confirmation
   [[ "$confirmation" == "MOVE_TO_DELETED_ITEMS" ]] \
     || die "Apply cancelled. No messages were moved."
@@ -204,15 +229,94 @@ run_apply_stage() {
     --state-dir "$STATE_DIR" \
     apply \
     --limit "$STAGE_LIMIT" \
+    --workers "$GRAPH_WORKERS" \
     --confirm "$confirmation" \
     "${SELECTION_ARGS[@]}"
 
   printf '\nRerun make mailbox-apply-stage to continue this same resumable selection.\n'
 }
 
+run_apply_stage_all() {
+  prepare_auth
+  selection_args
+  require_integer_between MAILBOX_STAGE_LIMIT "$STAGE_LIMIT" 1 5000
+  require_integer_between MAILBOX_STAGE_RUN_LIMIT "$STAGE_RUN_LIMIT" 1 50000
+  require_integer_between MAILBOX_GRAPH_WORKERS "$GRAPH_WORKERS" 1 8
+
+  local preview pending label target confirmation attempted
+  preview="$(plan_json)"
+  printf '%s\n' "$preview"
+  pending="$(printf '%s' "$preview" | json_value 'json.load(sys.stdin)["selection"]["pending"]')"
+  if [[ "$pending" == "0" ]]; then
+    note "This apply selection is already complete"
+    return
+  fi
+
+  label="$(selection_label)"
+  target="$pending"
+  (( target > STAGE_RUN_LIMIT )) && target="$STAGE_RUN_LIMIT"
+  printf '\nType MOVE_TO_DELETED_ITEMS to process up to %s messages from %s in checkpointed chunks of %s using %s workers (%s pending): ' \
+    "$target" "$label" "$STAGE_LIMIT" "$GRAPH_WORKERS" "$pending"
+  read -r confirmation
+  [[ "$confirmation" == "MOVE_TO_DELETED_ITEMS" ]] \
+    || die "Apply cancelled. No messages were moved."
+
+  attempted=0
+  while (( attempted < STAGE_RUN_LIMIT )); do
+    local current current_pending allowance chunk result rc requested moved missing failed remaining progressed
+    current="$(plan_json)"
+    current_pending="$(printf '%s' "$current" | json_value 'json.load(sys.stdin)["selection"]["pending"]')"
+    if [[ "$current_pending" == "0" ]]; then
+      note "The $label selection is complete"
+      return
+    fi
+
+    allowance=$((STAGE_RUN_LIMIT - attempted))
+    chunk="$STAGE_LIMIT"
+    (( chunk > current_pending )) && chunk="$current_pending"
+    (( chunk > allowance )) && chunk="$allowance"
+    note "Processing the next $chunk messages from $label ($current_pending pending before this chunk)"
+
+    set +e
+    result="$(.venv/bin/python mailbox_cleanup.py \
+      --state-dir "$STATE_DIR" \
+      apply \
+      --limit "$chunk" \
+      --workers "$GRAPH_WORKERS" \
+      --confirm "$confirmation" \
+      "${SELECTION_ARGS[@]}")"
+    rc=$?
+    set -e
+    printf '%s\n' "$result"
+    (( rc == 0 )) || die "The continuous apply stopped after a failed chunk. Rerun the same command after reviewing the result."
+
+    requested="$(printf '%s' "$result" | json_value 'json.load(sys.stdin)["requested"]')"
+    moved="$(printf '%s' "$result" | json_value 'json.load(sys.stdin)["moved"]')"
+    missing="$(printf '%s' "$result" | json_value 'json.load(sys.stdin)["missing"]')"
+    failed="$(printf '%s' "$result" | json_value 'json.load(sys.stdin)["failed"]')"
+    remaining="$(printf '%s' "$result" | json_value 'json.load(sys.stdin)["remaining"]')"
+    attempted=$((attempted + requested))
+    progressed=$((moved + missing))
+
+    (( failed == 0 )) || die "The continuous apply stopped because $failed messages failed in the last chunk."
+    (( requested > 0 && progressed > 0 )) \
+      || die "The continuous apply made no progress and stopped to avoid an endless loop."
+    if [[ "$remaining" == "0" ]]; then
+      note "The $label selection is complete after attempting $attempted messages in this run"
+      return
+    fi
+    sleep 1
+  done
+
+  note "Stopped at MAILBOX_STAGE_RUN_LIMIT=$STAGE_RUN_LIMIT with work still pending. Rerun make mailbox-apply-stage-all to continue."
+}
+
 run_apply() {
   prepare_auth
-  printf 'Type MOVE_TO_DELETED_ITEMS to move up to %s reviewed messages from the whole plan: ' "$APPLY_LIMIT"
+  require_integer_between MAILBOX_APPLY_LIMIT "$APPLY_LIMIT" 1 5000
+  require_integer_between MAILBOX_GRAPH_WORKERS "$GRAPH_WORKERS" 1 8
+  printf 'Type MOVE_TO_DELETED_ITEMS to move up to %s reviewed messages from the whole plan using %s workers: ' \
+    "$APPLY_LIMIT" "$GRAPH_WORKERS"
   read -r confirmation
   [[ "$confirmation" == "MOVE_TO_DELETED_ITEMS" ]] \
     || die "Apply cancelled. No messages were moved."
@@ -221,6 +325,7 @@ run_apply() {
     --state-dir "$STATE_DIR" \
     apply \
     --limit "$APPLY_LIMIT" \
+    --workers "$GRAPH_WORKERS" \
     --confirm "$confirmation"
 
   printf '\nRepeat make mailbox-apply to continue the whole reviewed plan in bounded runs.\n'
@@ -243,14 +348,15 @@ help_text() {
   cat <<'EOF'
 Historical mailbox cleanup
 
-  make mailbox-audit          Scan/resume Inbox and build a non-destructive report
-  make mailbox-report         Print the latest report without contacting Microsoft
-  make mailbox-review         Inspect unmatched senders and redacted subject patterns locally
-  make mailbox-prepare-apply  Create the ignored private policy and rebuild the local plan
-  make mailbox-plan           Preview a named stage or explicit policies without Microsoft
-  make mailbox-apply-stage    Move up to 5,000 messages from one reviewed stage
-  make mailbox-apply          Legacy whole-plan apply, bounded to 500 by default
-  make mailbox-reset          Delete only the private local scan state
+  make mailbox-audit            Scan/resume Inbox and build a non-destructive report
+  make mailbox-report           Print the latest report without contacting Microsoft
+  make mailbox-review           Inspect unmatched senders and redacted subject patterns locally
+  make mailbox-prepare-apply    Create the ignored private policy and rebuild the local plan
+  make mailbox-plan             Preview a named stage or explicit policies without Microsoft
+  make mailbox-apply-stage      Move one checkpointed chunk from a reviewed stage
+  make mailbox-apply-stage-all  Confirm once and continue checkpointed chunks until done or capped
+  make mailbox-apply            Legacy whole-plan bounded apply
+  make mailbox-reset            Delete only the private local scan state
 
 Named stages:
   bulk         promotions, job alerts, social notifications and short-lived digests
@@ -266,17 +372,22 @@ Defaults:
   MAILBOX_STATE_DIR=.mailbox-cleanup/inbox
   MAILBOX_APPLY_STAGE=bulk
   MAILBOX_STAGE_LIMIT=5000
+  MAILBOX_STAGE_RUN_LIMIT=30000
+  MAILBOX_GRAPH_WORKERS=4
   MAILBOX_APPLY_LIMIT=500
   MAILBOX_REVIEW_TOP=25
   MAILBOX_REVIEW_SAMPLES=4
 
 Examples:
-  MAILBOX_APPLY_STAGE=newsletters make mailbox-plan
-  MAILBOX_APPLY_STAGE=newsletters make mailbox-apply-stage
+  make mailbox-apply-stage-all
+  MAILBOX_STAGE_RUN_LIMIT=10000 make mailbox-apply-stage-all
+  MAILBOX_GRAPH_WORKERS=2 make mailbox-apply-stage-all
+  MAILBOX_APPLY_STAGE=newsletters make mailbox-apply-stage-all
   MAILBOX_APPLY_POLICIES=shipment-tracking,uber-order-notifications make mailbox-plan
 
-Apply refuses incomplete scans and checked-in example policy files. Run
-make mailbox-prepare-apply once before the first apply run.
+Continuous apply checkpoints after every chunk, stops on failures or no progress,
+and never processes more than MAILBOX_STAGE_RUN_LIMIT in one invocation. Apply
+refuses incomplete scans and checked-in example policy files.
 EOF
 }
 
@@ -288,6 +399,7 @@ case "${1:-help}" in
   prepare-apply) run_prepare_apply ;;
   plan) run_plan ;;
   apply-stage) run_apply_stage ;;
+  apply-stage-all) run_apply_stage_all ;;
   apply) run_apply ;;
   reset) run_reset ;;
   *) die "Unknown command: ${1:-}. Run make help." ;;
