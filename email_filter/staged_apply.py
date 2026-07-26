@@ -142,6 +142,7 @@ def apply_plan_selection(
             "remainingAll": status["allPlan"]["pending"],
             "byPolicy": status["selection"]["byPolicy"],
             "workers": workers,
+            "graphDiagnostics": {},
         }
 
     deleted_items_id = client.get_well_known_folder_id("deleteditems")
@@ -162,4 +163,5 @@ def apply_plan_selection(
         "remainingAll": status["allPlan"]["pending"],
         "byPolicy": status["selection"]["byPolicy"],
         "workers": workers,
+        "graphDiagnostics": dict(getattr(client, "last_move_diagnostics", {}) or {}),
     }
