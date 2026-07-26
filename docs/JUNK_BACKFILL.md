@@ -93,6 +93,16 @@ make microsoft-login
 
 Then rerun the same audit or apply command.
 
+## Local verification
+
+When GitHub Actions is unavailable or its usage allowance is exhausted, run the repository checks locally before the first apply:
+
+```bash
+make test
+```
+
+The test command covers the backfill timestamp parser, 401 refresh retry, privacy-minimised plan, DELETE-only selection, resume behaviour, Python compilation, and shell syntax.
+
 ## Reset local state
 
 ```bash
