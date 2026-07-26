@@ -24,7 +24,13 @@ For a large existing Inbox, start with the non-destructive historical audit:
 make mailbox-audit
 ```
 
-The audit scans or resumes the Inbox, writes private local checkpoints, and produces counts for protected, retained, eligible, and unmatched messages. It moves nothing. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
+The audit scans or resumes the Inbox, writes private local checkpoints, and produces counts for protected, retained, eligible, and unmatched messages. It moves nothing. Review unmatched senders without another Microsoft request:
+
+```bash
+make mailbox-review
+```
+
+That review uses the private local snapshot, redacts obvious identifiers from subject patterns, and includes no message IDs, bodies, previews, or attachments. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
 
 Useful commands:
 
@@ -40,6 +46,7 @@ make logs-webhook     Follow webhook logs
 make upgrade-runtime  Upgrade both email Lambdas to Python 3.14
 make mailbox-audit    Scan/resume Inbox and build a non-destructive report
 make mailbox-report   Print the latest local mailbox report
+make mailbox-review   Inspect unmatched senders and redacted subject patterns
 make mailbox-apply    Move a bounded reviewed batch to Deleted Items
 make mailbox-reset    Delete only the private local cleanup state
 ```
@@ -52,6 +59,7 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Webhook notifications must match the stored subscription ID and client state.
 - Notifications are processed by exact immutable Outlook message ID.
 - Historical cleanup audit mode moves nothing and checkpoints after complete pages.
+- Historical cleanup review mode is local-only and redacts obvious subject identifiers.
 - Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
 - Historical cleanup applies at most 500 messages per run unless explicitly overridden.
 - The retention service defaults to audit mode.
@@ -63,13 +71,13 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 ## Repository map
 
 ```text
-email_filter/                 shared auth, Graph, policy and retention code
+email_filter/                 shared auth, Graph, policy, review and retention code
 handlers/                     Lambda handlers, including the retention sweeper
 policies/                     checked-in example policies; personal policies are ignored
 scripts/email-filter.sh       local authentication and AWS operations
 scripts/lambda-deploy.sh      cached Lambda packaging and deployment
 scripts/mailbox-cleanup.sh    resumable historical mailbox operations
-mailbox_cleanup.py            historical audit/report/apply CLI
+mailbox_cleanup.py            historical audit/report/review/apply CLI
 webhook_handler.py            deployed Junk Guard webhook
 setup_webhook.py              secured Graph subscription setup
 setup_token_interactive.py    Microsoft browser authentication and cache refresh
@@ -98,4 +106,4 @@ The webhook package is built inside the official Python Docker image for the dep
 
 ## Current roadmap
 
-The historical audit now handles the existing backlog locally. Next work includes an audit-only scheduled retention deployment, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The historical audit now handles the existing backlog locally. Next work includes tuning the private policy from the unmatched review, deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
