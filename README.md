@@ -30,7 +30,13 @@ The audit scans or resumes the Inbox, writes private local checkpoints, and prod
 make mailbox-review
 ```
 
-That review uses the private local snapshot, redacts obvious identifiers from subject patterns, and includes no message IDs, bodies, previews, or attachments. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
+Create a compact analysis package instead of pasting a large report into chat:
+
+```bash
+make mailbox-export
+```
+
+The export re-evaluates the saved snapshot against the current policy without contacting Microsoft. It writes aggregate JSON, flat CSV files and a multi-sheet Excel workbook under `.mailbox-cleanup/inbox/export/`. The uploadable files contain sender addresses and redacted subject patterns, but no message IDs, bodies, previews, attachments or raw subjects. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
 
 Useful commands:
 
@@ -47,6 +53,7 @@ make upgrade-runtime  Upgrade both email Lambdas to Python 3.14
 make mailbox-audit    Scan/resume Inbox and build a non-destructive report
 make mailbox-report   Print the latest local mailbox report
 make mailbox-review   Inspect unmatched senders and redacted subject patterns
+make mailbox-export   Build uploadable JSON, CSV and Excel analysis files
 make mailbox-apply    Move a bounded reviewed batch to Deleted Items
 make mailbox-reset    Delete only the private local cleanup state
 ```
@@ -60,6 +67,7 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Notifications are processed by exact immutable Outlook message ID.
 - Historical cleanup audit mode moves nothing and checkpoints after complete pages.
 - Historical cleanup review mode is local-only and redacts obvious subject identifiers.
+- Historical cleanup exports contain aggregate sender data and redacted subject patterns, not raw message-level content.
 - Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
 - Historical cleanup applies at most 500 messages per run unless explicitly overridden.
 - The retention service defaults to audit mode.
@@ -71,13 +79,15 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 ## Repository map
 
 ```text
-email_filter/                 shared auth, Graph, policy, review and retention code
+email_filter/                 shared auth, Graph, policy, review, export and retention code
 handlers/                     Lambda handlers, including the retention sweeper
 policies/                     checked-in example policies; personal policies are ignored
 scripts/email-filter.sh       local authentication and AWS operations
 scripts/lambda-deploy.sh      cached Lambda packaging and deployment
 scripts/mailbox-cleanup.sh    resumable historical mailbox operations
+scripts/mailbox-export.sh     uploadable mailbox analysis package
 mailbox_cleanup.py            historical audit/report/review/apply CLI
+mailbox_export.py             local JSON/CSV/XLSX export CLI
 webhook_handler.py            deployed Junk Guard webhook
 setup_webhook.py              secured Graph subscription setup
 setup_token_interactive.py    Microsoft browser authentication and cache refresh
@@ -106,4 +116,4 @@ The webhook package is built inside the official Python Docker image for the dep
 
 ## Current roadmap
 
-The historical audit now handles the existing backlog locally. Next work includes tuning the private policy from the unmatched review, deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The historical audit, review and analysis export now handle the existing backlog locally. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
