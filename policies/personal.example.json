@@ -11,21 +11,100 @@
     },
     {
       "id": "purchase-receipts",
-      "description": "Keep receipts, invoices, refunds and warranties forever.",
+      "description": "Keep receipts, invoices, refunds, cancellations and warranties forever.",
       "priority": 10,
       "match": {
+        "subjectContains": [
+          "receipt",
+          "invoice",
+          "refund",
+          "warranty",
+          "order confirmation",
+          "payment confirmation",
+          "cancellation confirmation",
+          "cancelled order",
+          "canceled order"
+        ]
+      },
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "crypto-account-records",
+      "description": "Keep Crypto.com verification, transfer, deposit and withdrawal history.",
+      "priority": 10,
+      "match": {"senders": ["hello@crypto.com"]},
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "brokerage-account-records",
+      "description": "Keep brokerage account mail unless a narrower reviewed policy is added later.",
+      "priority": 10,
+      "match": {"senderDomains": ["interactivebrokers.com"]},
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "job-application-platform-records",
+      "description": "Keep application confirmations and status mail from applicant-tracking platforms.",
+      "priority": 12,
+      "match": {
+        "senderDomains": ["us.greenhouse-mail.io", "myworkday.com"]
+      },
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "linkedin-job-application-records",
+      "description": "Keep LinkedIn application submissions and status updates.",
+      "priority": 12,
+      "match": {
+        "senders": ["jobs-noreply@linkedin.com"],
+        "subjectContains": [
+          "application",
+          "interview",
+          "candidate",
+          "thank you for applying",
+          "thanks for applying"
+        ]
+      },
+      "retention": {"mode": "forever"}
+    },
+    {
+      "id": "uber-security-records",
+      "description": "Keep Uber security and account-access notices.",
+      "priority": 12,
+      "match": {
         "senders": ["noreply@uber.com"],
-        "subjectContains": ["receipt", "invoice", "refund", "warranty"]
+        "subjectContains": [
+          "security alert",
+          "new login",
+          "password",
+          "verification",
+          "sign-in",
+          "signin",
+          "new device"
+        ]
       },
       "retention": {"mode": "forever"}
     },
     {
       "id": "building-records",
-      "description": "Keep lease, legal and formal property records forever.",
+      "description": "Keep lease, legal, management and maintenance records forever.",
       "priority": 15,
       "match": {
-        "senderDomains": ["iconconnect.ca"],
-        "subjectContains": ["lease", "legal notice", "management notice", "warranty"]
+        "senderDomains": [
+          "iconconnect.ca",
+          "iconpm.ca",
+          "condo-communities.com"
+        ],
+        "subjectContains": [
+          "lease",
+          "legal notice",
+          "management",
+          "maintenance",
+          "warranty",
+          "new document",
+          "fire inspection",
+          "water shutoff"
+        ]
       },
       "retention": {"mode": "forever"}
     },
@@ -41,8 +120,16 @@
       "description": "Keep package notices for six months.",
       "priority": 20,
       "match": {
-        "senderDomains": ["iconconnect.ca"],
-        "subjectContains": ["package notification"]
+        "senderDomains": [
+          "iconconnect.ca",
+          "iconpm.ca",
+          "condo-communities.com"
+        ],
+        "subjectContains": [
+          "package notification",
+          "package delivered",
+          "parcel notification"
+        ]
       },
       "retention": {"mode": "days", "days": 180}
     },
@@ -57,10 +144,30 @@
       "retention": {"mode": "days_and_latest", "days": 365, "keepLatest": 150}
     },
     {
+      "id": "uber-order-notifications",
+      "description": "Keep Uber Eats order and delivery notices for six months.",
+      "priority": 20,
+      "match": {
+        "senders": ["noreply@uber.com"],
+        "subjectContains": [
+          "order with uber eats",
+          "order delivered",
+          "delivery update"
+        ]
+      },
+      "retention": {"mode": "days", "days": 180}
+    },
+    {
       "id": "building-announcements",
-      "description": "Routine amenity, elevator and maintenance announcements expire after a year.",
+      "description": "Routine amenity, elevator, classified and general building notices expire after a year.",
       "priority": 30,
-      "match": {"senderDomains": ["iconconnect.ca"]},
+      "match": {
+        "senderDomains": [
+          "iconconnect.ca",
+          "iconpm.ca",
+          "condo-communities.com"
+        ]
+      },
       "retention": {"mode": "days", "days": 365}
     },
     {
@@ -72,17 +179,34 @@
     },
     {
       "id": "job-alerts",
-      "description": "Keep a recent rolling selection of job alerts.",
+      "description": "Keep a recent rolling selection of job alerts and opportunity digests.",
       "priority": 40,
       "match": {
         "senders": [
           "jobalerts-noreply@linkedin.com",
+          "jobs-noreply@linkedin.com",
+          "jobs-listings@linkedin.com",
           "alert@indeed.com",
+          "noreply@glassdoor.com",
           "dice@connect.dice.com",
+          "team@80000hours.org",
           "help@welcometothejungle.com"
         ]
       },
       "retention": {"mode": "days_and_latest", "days": 30, "keepLatest": 25}
+    },
+    {
+      "id": "linkedin-social-notifications",
+      "description": "Keep a short rolling history of LinkedIn profile, invitation and company-update notifications.",
+      "priority": 40,
+      "match": {
+        "senders": [
+          "notifications-noreply@linkedin.com",
+          "messages-noreply@linkedin.com",
+          "updates-noreply@linkedin.com"
+        ]
+      },
+      "retention": {"mode": "days_and_latest", "days": 90, "keepLatest": 50}
     },
     {
       "id": "deployment-alerts",
@@ -92,15 +216,48 @@
       "retention": {"mode": "days_and_latest", "days": 14, "keepLatest": 20}
     },
     {
+      "id": "uber-promotions",
+      "description": "Expire Uber membership and discount promotions after a short browsing window.",
+      "priority": 70,
+      "match": {
+        "senders": ["noreply@uber.com"],
+        "subjectContains": [
+          "save with uber one",
+          "months free",
+          "% off",
+          "promo",
+          "offer",
+          "discount",
+          "free when you join"
+        ]
+      },
+      "retention": {"mode": "days", "days": 45}
+    },
+    {
       "id": "marketing-promotions",
-      "description": "Known promotional feeds expire after a short browsing window.",
+      "description": "Known retail and promotional feeds expire after a short browsing window.",
       "priority": 80,
       "match": {
         "senders": [
           "uber@uber.com",
+          "ubereats@uber.com",
           "news@newsletter.hellofresh.ca",
           "offers@youroffers.dominos.ca",
-          "email@deals.dominos.ca"
+          "email@deals.dominos.ca",
+          "info@n.myprotein.com",
+          "newsletter@enews.uniqlo.ca",
+          "footlocker@bc.footlocker.ca",
+          "adidas@ca-news.adidas.com",
+          "store-news@amazon.ca",
+          "pizzanova@mg.pizzanova.com",
+          "noreply@email.pcoptimum.ca",
+          "mpp@em.home.dell.ca",
+          "info@e.shoppersdrugmart.ca",
+          "no.reply@connect.razer.com",
+          "mcdonaldscanada@my.mcdonalds.ca",
+          "newsletters@news.ln-cc.com",
+          "foolmail@fool.ca",
+          "microsoftstore@microsoftstoreemail.com"
         ]
       },
       "retention": {"mode": "days", "days": 45}
