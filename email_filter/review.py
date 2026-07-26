@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -9,39 +10,53 @@ from typing import Any, Iterable
 from .models import MailMessage, Policy
 
 _URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
-_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_EMAIL_RE = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE,
+)
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
 )
-_LONG_TOKEN_RE = re.compile(r"\b(?=[A-Z0-9_-]{10,}\b)(?=[A-Z0-9_-]*\d)[A-Z0-9_-]+\b", re.IGNORECASE)
+_LONG_TOKEN_RE = re.compile(
+    r"\b(?=[A-Z0-9_-]{10,}\b)(?=[A-Z0-9_-]*\d)[A-Z0-9_-]+\b",
+    re.IGNORECASE,
+)
 _NUMBER_RE = re.compile(r"\b\d+(?:[.,:/-]\d+)*\b")
 _SPACE_RE = re.compile(r"\s+")
 
 _SIGNAL_TERMS: dict[str, tuple[str, ...]] = {
     "securityAccount": (
-        "account",
+        "account alert",
         "login",
         "password",
-        "security",
+        "security alert",
         "verification",
-        "verify",
+        "verify your email",
         "sign-in",
         "signin",
         "authentication",
         "one-time code",
+        "new device",
     ),
     "financial": (
-        "bank",
+        "bank account",
         "brokerage",
-        "statement",
-        "trade",
+        "account statement",
+        "monthly statement",
+        "trade confirmation",
         "dividend",
-        "deposit",
-        "withdrawal",
-        "tax",
-        "interest",
-        "payment",
+        "deposit completed",
+        "deposit request",
+        "withdrawal completed",
+        "withdrawal request",
+        "tax document",
+        "tax form",
+        "interest payment",
+        "payment due",
+        "payment failed",
+        "payment received",
+        "payment confirmation",
     ),
     "purchaseRecord": (
         "receipt",
@@ -50,37 +65,46 @@ _SIGNAL_TERMS: dict[str, tuple[str, ...]] = {
         "warranty",
         "order confirmation",
         "payment confirmation",
-        "cancelled",
-        "canceled",
+        "cancellation confirmation",
+        "cancelled order",
+        "canceled order",
     ),
     "delivery": (
         "shipped",
         "shipment",
         "tracking",
-        "delivery",
+        "delivery update",
         "delivered",
-        "package",
-        "parcel",
+        "package notification",
+        "parcel notification",
     ),
     "propertyLegal": (
         "lease",
-        "legal",
-        "maintenance",
-        "management",
-        "building",
+        "legal notice",
+        "property management",
+        "management notice",
+        "building notice",
         "elevator",
         "amenity",
-        "condo",
+        "condo notice",
+        "maintenance notice",
+        "maintenance record",
+        "water shutoff",
+        "fire inspection",
     ),
     "jobApplication": (
         "application",
         "interview",
         "recruiter",
         "candidate",
-        "position",
         "job alert",
         "job opportunity",
         "hiring",
+        "new roles",
+        "new vacancies",
+        "thank you for applying",
+        "thanks for applying",
+        "apply now",
     ),
     "promotion": (
         "sale",
@@ -106,7 +130,10 @@ def sender_domain(sender: str) -> str:
     return sender.rsplit("@", 1)[-1].lower() if "@" in sender else ""
 
 
-def first_matching_policy(message: MailMessage, policies: Iterable[Policy]) -> Policy | None:
+def first_matching_policy(
+    message: MailMessage,
+    policies: Iterable[Policy],
+) -> Policy | None:
     ordered = sorted(
         (policy for policy in policies if policy.enabled),
         key=lambda policy: (policy.priority, policy.id),
@@ -142,6 +169,19 @@ def _subject_signals(subject: str) -> set[str]:
     }
 
 
+def _manual_review_signals(
+    signals: Counter[str],
+    message_count: int,
+) -> dict[str, int]:
+    """Return repeated non-promotional signals instead of one-off keyword noise."""
+    threshold = 1 if message_count <= 20 else max(3, math.ceil(message_count * 0.01))
+    return {
+        key: count
+        for key, count in sorted(signals.items())
+        if key != "promotion" and count >= threshold
+    }
+
+
 def _sender_summary(
     sender: str,
     messages: list[MailMessage],
@@ -157,11 +197,7 @@ def _sender_summary(
             signals[signal] += 1
 
     received = [message.received_at for message in messages]
-    protected_signals = {
-        key: count
-        for key, count in sorted(signals.items())
-        if key != "promotion" and count > 0
-    }
+    review_signals = _manual_review_signals(signals, len(messages))
     return {
         "sender": sender,
         "domain": sender_domain(sender),
@@ -172,7 +208,8 @@ def _sender_summary(
         "lastReceived": _iso(max(received)),
         "byYear": dict(sorted(years.items())),
         "subjectSignals": dict(sorted(signals.items())),
-        "manualReviewRecommended": bool(protected_signals),
+        "manualReviewSignals": review_signals,
+        "manualReviewRecommended": bool(review_signals),
         "topSubjectPatterns": [
             {"pattern": pattern, "count": count}
             for pattern, count in patterns.most_common(max(1, samples_per_sender))
