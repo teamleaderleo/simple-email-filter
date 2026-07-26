@@ -1,209 +1,81 @@
-# Simple Automated Junk Mail Filter for Outlook
+# Simple Email Filter for Outlook
 
-Outlook inbox rules don't affect Junk, so I had to make this!!!
+A personal Outlook automation project with two related jobs:
 
-AI-powered email filtering for Microsoft Outlook/Hotmail that runs in AWS Lambda! Uses GPT-5-mini to intelligently identify and delete only the worst spam while keeping legitimate emails.
+- **Junk Guard** processes messages Outlook has already placed in Junk. It uses conservative deterministic checks and a Cloudflare Workers AI fallback, keeping uncertain mail.
+- **Mailbox Retention** lets ordinary mail arrive normally, then identifies categories that may be moved to Deleted Items after an explicit retention period. Retention currently defaults to audit mode.
 
-## Note:
+## Routine operations
 
-The setup instructions aren't as granular as I'd like; if you are having trouble replicating this and LLMs aren't helping enough, I can rewrite this for you. 
+The repository owns its deployment procedure. After the initial AWS login, a normal webhook update is:
 
-Just add an issue in https://github.com/teamleaderleo/simple-email-filter/issues and I'll get around to it.
-
-## What It Does
-
-- Scans your junk folder every 15 minutes
-- Uses OpenAI's GPT-5-mini to analyze emails
-- Deletes only obvious phishing/scams/malware
-- Keeps legitimate newsletters, job alerts, and marketing emails
-- Runs automatically in the cloud (no manual intervention)
-
-## Cost
-
-- **Lambda**: Free (well under 1M requests/month)
-- **DynamoDB**: Free (25GB storage in free tier)
-- **OpenAI API**: Free (with data sharing enabled, 10M tokens/day)
-- **Total**: $0/month
-
-## Prerequisites
-
-- Microsoft personal account (Outlook, Hotmail, Live)
-- Azure app registration with Mail.ReadWrite permissions
-- AWS account with CLI configured
-- OpenAI API key with data sharing enabled
-- Python 3.11+
-- Docker Desktop
-
-## Project Structure
-
-```
-simple-email-filter/
-├── lambda_function.py      # Main Lambda code
-├── setup_token.py          # One-time token setup
-├── deploy.ps1              # Deployment script (Windows)
-├── requirements.txt        # Python dependencies
-├── .env                    # Environment variables
-└── README.md
+```bash
+git switch main
+git pull --ff-only
+make deploy-webhook
 ```
 
-## Setup
+That command checks the local machine and AWS resources, repairs the Python environment, runs tests, backs up the deployed Lambda, builds matching Linux dependencies, updates code without replacing secrets, refreshes Microsoft authentication only when needed, and recreates the secured Graph subscription.
 
-### 1. Azure App Registration
+Useful commands:
 
-1. Go to https://portal.azure.com
-2. Navigate to "App registrations" → "New registration"
-3. Name: "simple email filter"
-4. Supported account types: "Personal Microsoft accounts only"
-5. Redirect URI: Leave blank
-6. After creation, note the **Application (client) ID**
-7. Go to "API permissions" → "Add a permission" → "Microsoft Graph" → "Delegated permissions"
-8. Add: `Mail.ReadWrite` and `User.Read`
-9. Click "Grant admin consent"
-
-### 2. OpenAI Data Sharing (for free tokens)
-
-1. Go to https://platform.openai.com/settings/organization/data-sharing
-2. Enable data sharing for all projects
-3. Verify you see "You're eligible for free daily usage"
-
-### 3. Environment Variables
-
-Create `.env` file:
-
-```env
-CLIENT_ID=your-azure-client-id
-OPENAI_API_KEY=sk-proj-...
+```text
+make bootstrap        Create the Python 3.14 development environment
+make doctor           Check AWS login, resources and Lambda configuration
+make test             Run tests and syntax checks
+make deploy-webhook   Perform the complete safe webhook update
+make setup-webhook    Recreate only the Microsoft Graph subscription
+make microsoft-login  Force a Microsoft browser login
+make status           Show deployment status without secrets
+make logs-webhook     Follow webhook logs
+make upgrade-runtime  Explicitly upgrade the webhook Lambda to Python 3.14
 ```
 
-### 4. AWS Configuration
+See [Operations](docs/OPERATIONS.md) for first-time setup, rollback and troubleshooting.
 
-```powershell
-# Install AWS CLI if needed
-# Then configure credentials
-aws configure
-# Enter your Access Key ID, Secret Key, and region (us-east-1)
+## Safety defaults
+
+- Junk Guard deletes only messages already in Junk and keeps uncertain classifications.
+- Webhook notifications must match the stored subscription ID and client state.
+- Notifications are processed by exact immutable Outlook message ID.
+- The retention service defaults to audit mode.
+- Retention apply mode requires an explicit confirmation value.
+- The retention Graph client exposes moves to Deleted Items, not permanent deletion.
+- Deployment uses code-only Lambda updates so existing Microsoft and Cloudflare environment variables are preserved.
+- Message bodies and attachments are not stored for dashboard activity.
+
+## Repository map
+
+```text
+email_filter/              shared auth, Graph, policy and retention code
+handlers/                  Lambda handlers, including the retention sweeper
+policies/                  checked-in example policies; personal policies are ignored
+scripts/email-filter.sh    consolidated macOS/AWS operations
+webhook_handler.py         deployed Junk Guard webhook
+setup_webhook.py           secured Graph subscription setup
+setup_token_interactive.py Microsoft browser authentication and cache refresh
+docs/                      architecture, operations, policies and roadmap
+tests/                     unit tests
 ```
 
-### 5. Initial Authentication
+## Development
 
-```powershell
-python setup_token.py
+Local development targets Python 3.14. CI currently runs on Python 3.11 and 3.14 while the live Lambda runtime is transitioned deliberately.
+
+```bash
+make bootstrap
+make test
 ```
 
-Follow the device code prompt to authenticate. This uploads your token cache to AWS DynamoDB.
+The webhook package is built inside the official Python Docker image for the deployed Lambda runtime and CPU architecture, so compiled dependencies are not taken from macOS.
 
-### 6. Deploy to Lambda
+## Documentation
 
-```powershell
-# Build Linux-compatible packages with Docker
-docker run --rm -v ${PWD}:/var/task python:3.11-slim pip install -r /var/task/requirements.txt -t /var/task/package/
+- [Operations](docs/OPERATIONS.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Retention policies](docs/RETENTION_POLICIES.md)
+- [Roadmap](docs/ROADMAP.md)
 
-# Package and deploy
-Copy-Item lambda_function.py package/
-Compress-Archive -Path package\* -DestinationPath lambda-package.zip -Force
-.\deploy.ps1
-```
+## Current roadmap
 
-### 7. Test
-
-```powershell
-aws lambda invoke --function-name email-junk-filter --region us-east-1 output.json
-Get-Content output.json
-```
-
-## Management
-
-### View Logs
-
-```powershell
-aws logs tail /aws/lambda/email-junk-filter --follow --region us-east-1
-```
-
-### Change Schedule
-
-```powershell
-# Every 30 minutes
-aws events put-rule --name email-filter-schedule --schedule-expression "rate(30 minutes)" --region us-east-1
-
-# Every hour
-aws events put-rule --name email-filter-schedule --schedule-expression "rate(1 hour)" --region us-east-1
-
-# Every 5 minutes
-aws events put-rule --name email-filter-schedule --schedule-expression "rate(5 minutes)" --region us-east-1
-```
-
-### Manual Invocation
-
-```powershell
-aws lambda invoke --function-name email-junk-filter --region us-east-1 output.json
-Get-Content output.json
-```
-
-### Update Code
-
-After modifying `lambda_function.py`:
-
-```powershell
-Copy-Item lambda_function.py package/
-Compress-Archive -Path package\* -DestinationPath lambda-package.zip -Force
-aws lambda update-function-code --function-name email-junk-filter --zip-file fileb://lambda-package.zip --region us-east-1
-```
-
-## Troubleshooting
-
-### "No valid cached token found"
-
-The authentication token expired. Run:
-
-```powershell
-python setup_token.py
-```
-
-### "pydantic_core._pydantic_core" error
-
-Packages were built for Windows instead of Linux. Rebuild with Docker:
-
-```powershell
-Remove-Item -Recurse -Force package
-docker run --rm -v ${PWD}:/var/task python:3.11-slim pip install -r /var/task/requirements.txt -t /var/task/package/
-Copy-Item lambda_function.py package/
-Compress-Archive -Path package\* -DestinationPath lambda-package.zip -Force
-aws lambda update-function-code --function-name email-junk-filter --zip-file fileb://lambda-package.zip --region us-east-1
-```
-
-### Microsoft "new sign-in detected" emails
-
-Normal for the first few runs. Microsoft learns the pattern and stops sending them after a few executions.
-
-## Uninstall
-
-```powershell
-# Remove EventBridge schedule
-aws events remove-targets --rule email-filter-schedule --ids 1 --region us-east-1
-aws events delete-rule --name email-filter-schedule --region us-east-1
-
-# Delete Lambda function
-aws lambda delete-function --function-name email-junk-filter --region us-east-1
-
-# Delete DynamoDB table
-aws dynamodb delete-table --table-name email-filter-tokens --region us-east-1
-
-# Delete IAM role
-aws iam delete-role-policy --role-name email-filter-lambda-role --policy-name DynamoDBAccess
-aws iam detach-role-policy --role-name email-filter-lambda-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-aws iam delete-role --role-name email-filter-lambda-role
-```
-
-## How It Works
-
-1. EventBridge triggers Lambda function every 15 minutes
-2. Lambda retrieves cached auth token from DynamoDB
-3. Authenticates with Microsoft Graph API
-4. Fetches recent emails from junk folder
-5. Sends email list to GPT-5-mini for classification
-6. Deletes only the most heinous spam
-7. Updates token cache in DynamoDB if refreshed
-
-## Customizing Deletion Criteria
-
-Edit the prompt in `lambda_function.py` function `get_deletion_decisions()` to adjust what gets deleted vs kept.
+The immediate operational milestone is a stable Junk Guard deployment with one-command updates. Next work includes an audit-only scheduled retention deployment, mailbox-wide observe-only ingestion, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.

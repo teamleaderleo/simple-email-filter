@@ -1,0 +1,3 @@
+-r requirements.txt
+boto3[crt]
+python-dotenv

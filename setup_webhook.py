@@ -1,12 +1,17 @@
 """
-One-time setup script to create Microsoft Graph subscription for webhook notifications.
-Run this after deploying the webhook Lambda and API Gateway.
+Create a secured Microsoft Graph subscription for Junk-folder notifications.
+
+Routine use should go through `make deploy-webhook` or `make setup-webhook` so
+AWS checks, Microsoft token refresh and the API Gateway URL are handled for you.
 """
 
-import json
+from __future__ import annotations
+
+import argparse
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import boto3
 import msal
@@ -28,25 +33,33 @@ dynamodb_client = boto3.client("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(TABLE_NAME)
 
 
+class MicrosoftAuthenticationError(RuntimeError):
+    pass
+
+
 def get_token_cache():
     try:
         response = table.get_item(Key={"id": "token"})
         if "Item" in response:
             return response["Item"].get("cache")
         return None
-    except ClientError as e:
-        print(f"Error reading from DynamoDB: {e}")
-        return None
+    except ClientError as exc:
+        raise RuntimeError("Could not read the Microsoft token cache") from exc
 
 
 def save_token_cache(cache_data):
     try:
         table.put_item(Item={"id": "token", "cache": cache_data})
-    except ClientError as e:
-        print(f"Error writing to DynamoDB: {e}")
+    except ClientError as exc:
+        raise RuntimeError("Could not update the Microsoft token cache") from exc
 
 
 def authenticate_microsoft():
+    if not CLIENT_ID:
+        raise MicrosoftAuthenticationError(
+            "CLIENT_ID is missing. Run make doctor or add it to .env."
+        )
+
     cache = msal.SerializableTokenCache()
     cached_data = get_token_cache()
     if cached_data:
@@ -59,16 +72,24 @@ def authenticate_microsoft():
     )
     accounts = app.get_accounts()
     if accounts:
-        print("Using cached credentials from DynamoDB...")
+        print("Using cached Microsoft credentials from DynamoDB...")
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result and "access_token" in result:
             if cache.has_state_changed:
                 save_token_cache(cache.serialize())
             return result["access_token"]
 
-    raise Exception(
-        "No valid cached token found. Run setup_token_interactive.py first."
+    raise MicrosoftAuthenticationError(
+        "No valid cached token found. Run make microsoft-login."
     )
+
+
+def get_subscription_record():
+    try:
+        response = table.get_item(Key={"id": "webhook-subscription"})
+    except ClientError as exc:
+        raise RuntimeError("Could not read the existing subscription record") from exc
+    return response.get("Item") or {}
 
 
 def save_subscription_record(subscription_id, client_state):
@@ -81,8 +102,8 @@ def save_subscription_record(subscription_id, client_state):
             }
         )
         print(f"Saved subscription ID to DynamoDB: {subscription_id}")
-    except ClientError as e:
-        raise RuntimeError("Could not save webhook subscription security record") from e
+    except ClientError as exc:
+        raise RuntimeError("Could not save webhook subscription security record") from exc
 
 
 def ensure_seen_email_ttl():
@@ -110,15 +131,38 @@ def ensure_seen_email_ttl():
             },
         )
         print("Enabled DynamoDB TTL for seen-message idempotency records.")
-    except ClientError as e:
+    except ClientError as exc:
         print(
             "Warning: could not enable DynamoDB TTL for seen-message records: "
-            f"{e}"
+            f"{exc}"
         )
 
 
+def delete_old_subscription(session, subscription_id):
+    if not subscription_id:
+        return
+
+    response = session.delete(
+        "https://graph.microsoft.com/v1.0/subscriptions/"
+        + quote(subscription_id, safe=""),
+        timeout=30,
+    )
+    if response.status_code in {204, 404}:
+        print(f"Retired previous subscription: {subscription_id}")
+        return
+
+    print(
+        "Warning: the previous subscription could not be retired: "
+        f"HTTP {response.status_code} {response.text[:300]}"
+    )
+
+
 def create_subscription(webhook_url):
+    if not webhook_url.startswith("https://"):
+        raise ValueError("Webhook URL must start with https://")
+
     print(f"Creating subscription with webhook URL: {webhook_url}")
+    previous_subscription_id = get_subscription_record().get("subscription_id")
     token = authenticate_microsoft()
 
     session = requests.Session()
@@ -146,7 +190,7 @@ def create_subscription(webhook_url):
         None,
     )
     if not junk:
-        raise Exception("No Junk Email folder found")
+        raise RuntimeError("No Junk Email folder found")
 
     junk_id = junk["id"]
     print(f"Found Junk Email folder: {junk_id}")
@@ -173,7 +217,7 @@ def create_subscription(webhook_url):
         timeout=30,
     )
     if response.status_code != 201:
-        raise Exception(
+        raise RuntimeError(
             f"Failed to create subscription: HTTP {response.status_code} "
             f"{response.text[:500]}"
         )
@@ -182,32 +226,51 @@ def create_subscription(webhook_url):
     subscription_id = result.get("id")
     if not subscription_id:
         raise RuntimeError("Graph created a subscription without returning its id")
+
     print("\nSubscription created successfully.")
     print(f"Subscription ID: {subscription_id}")
     print(f"Expires: {result.get('expirationDateTime')}")
     save_subscription_record(subscription_id, client_state)
     ensure_seen_email_ttl()
+
+    if previous_subscription_id and previous_subscription_id != subscription_id:
+        delete_old_subscription(session, previous_subscription_id)
+
     return subscription_id
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Create the Microsoft Graph webhook subscription."
+    )
+    parser.add_argument(
+        "--webhook-url",
+        help="API Gateway webhook URL. Prompts when omitted.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    print("=== Microsoft Graph Webhook Setup ===\n")
-    print("Deploy the webhook Lambda and API Gateway first.\n")
-    webhook_url = input("Enter your API Gateway webhook URL: ").strip()
-    if not webhook_url.startswith("https://"):
-        print("URL must start with https://")
-        return
+    args = parse_args()
+    webhook_url = (args.webhook_url or "").strip()
+
+    if not webhook_url:
+        print("=== Microsoft Graph Webhook Setup ===\n")
+        webhook_url = input("Enter your API Gateway webhook URL: ").strip()
 
     try:
         subscription_id = create_subscription(webhook_url)
-        print("\nSetup complete.")
-        print("1. Renew the subscription at least every 2 days.")
-        print("2. Test by sending a message that Outlook places in Junk.")
-        print("3. Check Lambda logs for exact-message processing.")
-        print(f"Subscription ID: {subscription_id}")
-    except Exception as e:
-        print(f"Setup failed: {str(e)}")
+    except Exception as exc:
+        print(f"Setup failed: {exc}")
+        return 1
+
+    print("\nSetup complete.")
+    print("1. The subscription manager renews this subscription every 2 days.")
+    print("2. Test with a message that Outlook places in Junk.")
+    print("3. Use make logs-webhook to inspect exact-message processing.")
+    print(f"Subscription ID: {subscription_id}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
