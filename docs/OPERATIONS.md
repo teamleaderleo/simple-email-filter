@@ -25,8 +25,9 @@ make deploy-webhook
 9. builds matching Linux dependencies in Docker
 10. updates Lambda code without replacing environment variables
 11. checks the cached Microsoft token and opens browser authentication only when it has expired
-12. recreates the secured Microsoft Graph subscription using the API Gateway URL discovered from AWS
-13. verifies the subscription record without printing its client-state secret
+12. exercises the exact Microsoft Graph validation-token handshake against API Gateway
+13. recreates the secured Microsoft Graph subscription using the API Gateway URL discovered from AWS
+14. verifies the subscription record without printing its client-state secret
 
 Backups are written under `backups/<timestamp>/` and ignored by Git.
 
@@ -96,6 +97,17 @@ make microsoft-login
 ```
 
 The non-secret Azure application client ID is recovered from the existing Lambda and added to the ignored local `.env` file when it is missing. Cloudflare credentials are never copied into `.env` by the operations script.
+
+## Webhook validation failures
+
+Before asking Microsoft Graph to create a subscription, the setup command sends the same validation request Graph uses: an HTTP `POST` with a `validationToken` query parameter. The endpoint must return that token unchanged with HTTP 200 and a `text/plain` content type.
+
+When the probe fails, setup stops before creating a subscription and prints recent CloudWatch logs for `email-webhook-handler`. A 502 response normally indicates that API Gateway could not obtain a valid Lambda response, commonly because the deployed package is stale, incomplete or failed during module initialisation. Run the complete repair path:
+
+```bash
+git pull --ff-only
+make deploy-webhook
+```
 
 ## Rollback
 
