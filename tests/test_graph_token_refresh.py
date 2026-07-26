@@ -67,7 +67,7 @@ class GraphTokenRefreshTests(unittest.TestCase):
             "Bearer fresh-token",
         )
 
-    def test_second_401_reports_graph_error_detail(self):
+    def test_second_401_becomes_retryable_failed_outcome_with_diagnostics(self):
         session = FakeSession(
             [
                 FakeResponse({}, status_code=401),
@@ -82,20 +82,29 @@ class GraphTokenRefreshTests(unittest.TestCase):
                 ),
             ]
         )
+        refreshes = []
+
+        def refresh():
+            refreshes.append(True)
+            return "also-rejected"
+
         client = GraphClient(
             "stale-token",
             session=session,
-            token_refresher=lambda: "also-rejected",
+            token_refresher=refresh,
         )
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "InvalidAuthenticationToken: Access token validation failure",
-        ):
-            client.move_messages_detailed(
-                ["message-a"],
-                destination_folder_id="deleted",
-            )
+        outcomes = client.move_messages_detailed(
+            ["message-a"],
+            destination_folder_id="deleted",
+        )
+
+        self.assertEqual(outcomes, {"message-a": "failed"})
+        self.assertEqual(len(refreshes), 1)
+        self.assertEqual(len(session.posts), 2)
+        self.assertEqual(client.last_move_diagnostics["workerExceptions"], 1)
+        self.assertEqual(client.last_move_diagnostics["workerHttp401Messages"], 1)
+        self.assertEqual(client.last_move_diagnostics["failedMessages"], 1)
 
 
 if __name__ == "__main__":
