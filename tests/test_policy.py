@@ -64,6 +64,66 @@ class PolicyLoadingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "keepLatest"):
             load_policies(path)
 
+    def test_loads_sender_grouping_for_rolling_policy(self):
+        path = self._write(
+            {
+                "policies": [
+                    {
+                        "id": "rolling",
+                        "match": {
+                            "senders": ["one@example.com", "two@example.com"]
+                        },
+                        "retention": {
+                            "mode": "days_and_latest",
+                            "days": 30,
+                            "keepLatest": 5,
+                            "groupBy": "sender",
+                        },
+                    }
+                ]
+            }
+        )
+        policy = load_policies(path)[0]
+        self.assertEqual(policy.retention.group_by, "sender")
+
+    def test_rejects_grouping_for_non_rolling_policy(self):
+        path = self._write(
+            {
+                "policies": [
+                    {
+                        "id": "invalid",
+                        "match": {"senders": ["x@example.com"]},
+                        "retention": {
+                            "mode": "days",
+                            "days": 30,
+                            "groupBy": "sender",
+                        },
+                    }
+                ]
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "rolling latest modes"):
+            load_policies(path)
+
+    def test_rejects_unknown_grouping(self):
+        path = self._write(
+            {
+                "policies": [
+                    {
+                        "id": "invalid",
+                        "match": {"senders": ["x@example.com"]},
+                        "retention": {
+                            "mode": "latest",
+                            "keepLatest": 5,
+                            "groupBy": "domain",
+                        },
+                    }
+                ]
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "groupBy"):
+            load_policies(path)
+
 
 if __name__ == "__main__":
     unittest.main()

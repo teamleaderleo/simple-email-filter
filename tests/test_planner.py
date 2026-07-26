@@ -73,6 +73,58 @@ class RetentionPlannerTests(unittest.TestCase):
         )
         self.assertEqual([item.message_id for item in plan], ["third"])
 
+    def test_sender_grouping_keeps_latest_for_each_sender(self):
+        policy = Policy(
+            id="feeds",
+            description="",
+            match=MatchRule(
+                senders=("one@example.com", "two@example.com"),
+            ),
+            retention=RetentionRule(
+                mode="days_and_latest",
+                days=30,
+                keep_latest=1,
+                group_by="sender",
+            ),
+        )
+        plan = build_retention_plan(
+            [
+                message("one-new", 31, sender="one@example.com"),
+                message("one-old", 60, sender="one@example.com"),
+                message("two-new", 40, sender="two@example.com"),
+                message("two-old", 70, sender="two@example.com"),
+            ],
+            [policy],
+            now=NOW,
+        )
+        self.assertCountEqual(
+            [item.message_id for item in plan],
+            ["one-old", "two-old"],
+        )
+        self.assertTrue(all("per sender" in item.reason for item in plan))
+
+    def test_default_grouping_keeps_latest_across_whole_policy(self):
+        policy = Policy(
+            id="feeds",
+            description="",
+            match=MatchRule(
+                senders=("one@example.com", "two@example.com"),
+            ),
+            retention=RetentionRule(
+                mode="latest",
+                keep_latest=1,
+            ),
+        )
+        plan = build_retention_plan(
+            [
+                message("one-new", 31, sender="one@example.com"),
+                message("two-old", 60, sender="two@example.com"),
+            ],
+            [policy],
+            now=NOW,
+        )
+        self.assertEqual([item.message_id for item in plan], ["two-old"])
+
     def test_first_matching_policy_wins_even_when_input_is_unsorted(self):
         protected = Policy(
             id="protected",

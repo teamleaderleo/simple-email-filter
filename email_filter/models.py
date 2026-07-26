@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 RetentionMode = Literal["forever", "days", "latest", "days_and_latest"]
+RetentionGroup = Literal["policy", "sender"]
 ExpiryAction = Literal["deleteditems"]
 
 
@@ -84,6 +85,7 @@ class RetentionRule:
     mode: RetentionMode
     days: int | None = None
     keep_latest: int | None = None
+    group_by: RetentionGroup = "policy"
 
 
 @dataclass(frozen=True)
