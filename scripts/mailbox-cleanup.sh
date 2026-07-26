@@ -4,12 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+AWS_PROFILE="${AWS_PROFILE:-email}"
+AWS_REGION="${AWS_REGION:-us-east-2}"
+AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-$AWS_REGION}"
+AWS_PAGER=""
+export AWS_PROFILE AWS_REGION AWS_DEFAULT_REGION AWS_PAGER
+
 STATE_DIR="${MAILBOX_STATE_DIR:-$ROOT_DIR/.mailbox-cleanup/inbox}"
 POLICY_PATH="${MAILBOX_POLICY_PATH:-policies/personal.example.json}"
 FOLDER="${MAILBOX_FOLDER:-inbox}"
 PAGE_SIZE="${MAILBOX_PAGE_SIZE:-999}"
 TOP_COUNT="${MAILBOX_TOP_COUNT:-25}"
 APPLY_LIMIT="${MAILBOX_APPLY_LIMIT:-500}"
+WEBHOOK_FUNCTION="${WEBHOOK_FUNCTION:-email-webhook-handler}"
 
 note() {
   printf '\n==> %s\n' "$*"
@@ -20,8 +27,35 @@ die() {
   exit 1
 }
 
+aws_cmd() {
+  aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"
+}
+
 prepare_auth() {
-  bash scripts/email-filter.sh auth-check
+  [[ -x .venv/bin/python ]] || bash scripts/email-filter.sh bootstrap
+
+  aws_cmd sts get-caller-identity --query Arn --output text >/dev/null \
+    || die "AWS login is unavailable. Run: aws login --profile $AWS_PROFILE"
+
+  if [[ ! -f .env ]] || ! grep -Eq '^[[:space:]]*CLIENT_ID=' .env; then
+    local client_id
+    client_id="$(aws_cmd lambda get-function-configuration \
+      --function-name "$WEBHOOK_FUNCTION" \
+      --query 'Environment.Variables.CLIENT_ID' \
+      --output text)"
+    [[ -n "$client_id" && "$client_id" != "None" ]] \
+      || die "Could not recover CLIENT_ID from $WEBHOOK_FUNCTION"
+    touch .env
+    printf '\nCLIENT_ID=%s\n' "$client_id" >> .env
+    note "Added the non-secret Microsoft application client ID to .env"
+  fi
+
+  if ! .venv/bin/python setup_token_interactive.py --check; then
+    note "The cached Microsoft token needs a browser refresh"
+    bash scripts/email-filter.sh microsoft-login
+    .venv/bin/python setup_token_interactive.py --check \
+      || die "Microsoft authentication still failed after browser login."
+  fi
 }
 
 run_audit() {
