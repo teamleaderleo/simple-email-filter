@@ -36,12 +36,25 @@ def _default_state_dir() -> str:
     )
 
 
+def _bounded_apply_limit(value: str) -> int:
+    parsed = int(value)
+    if not 1 <= parsed <= 5000:
+        raise argparse.ArgumentTypeError("apply limit must be between 1 and 5000")
+    return parsed
+
+
 def _print(payload: dict) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def audit(args: argparse.Namespace) -> int:
     store = HistoricalMailboxStore(args.state_dir)
+    if store.apply_results_path.exists():
+        raise RuntimeError(
+            "Apply has already started for this state directory. Finish the current "
+            "plan or run mailbox-reset before creating a new plan."
+        )
+
     client = GraphClient(acquire_access_token())
     checkpoint = scan_folder(
         client,
@@ -59,6 +72,7 @@ def audit(args: argparse.Namespace) -> int:
         top_limit=args.top,
     )
     summary["checkpointScanned"] = int(checkpoint.get("scanned", 0))
+    store.write_summary(summary)
     _print(summary)
     return 0
 
@@ -134,7 +148,7 @@ def parser() -> argparse.ArgumentParser:
         "apply",
         help="Move a bounded part of the reviewed plan to Deleted Items.",
     )
-    apply_parser.add_argument("--limit", type=int, default=500)
+    apply_parser.add_argument("--limit", type=_bounded_apply_limit, default=500)
     apply_parser.add_argument(
         "--confirm",
         required=True,
