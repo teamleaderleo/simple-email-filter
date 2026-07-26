@@ -31,8 +31,15 @@ aws_cmd() {
   aws --profile "$AWS_PROFILE" --region "$AWS_REGION" "$@"
 }
 
+ensure_local_python() {
+  if [[ ! -x .venv/bin/python ]] \
+    || ! .venv/bin/python -c 'import sys, awscrt, boto3, dotenv, msal, requests; raise SystemExit(0 if sys.version_info[:2] == (3, 14) else 1)' >/dev/null 2>&1; then
+    bash scripts/email-filter.sh bootstrap
+  fi
+}
+
 prepare_auth() {
-  [[ -x .venv/bin/python ]] || bash scripts/email-filter.sh bootstrap
+  ensure_local_python
 
   aws_cmd sts get-caller-identity --query Arn --output text >/dev/null \
     || die "AWS login is unavailable. Run: aws login --profile $AWS_PROFILE"
@@ -75,7 +82,7 @@ run_audit() {
 }
 
 run_report() {
-  [[ -x .venv/bin/python ]] || bash scripts/email-filter.sh bootstrap
+  ensure_local_python
   .venv/bin/python mailbox_cleanup.py \
     --state-dir "$STATE_DIR" \
     report
@@ -103,7 +110,7 @@ run_reset() {
   [[ "$confirmation" == "RESET_LOCAL_STATE" ]] \
     || die "Reset cancelled."
 
-  [[ -x .venv/bin/python ]] || bash scripts/email-filter.sh bootstrap
+  ensure_local_python
   .venv/bin/python mailbox_cleanup.py \
     --state-dir "$STATE_DIR" \
     reset \
