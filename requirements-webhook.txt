@@ -1,2 +1,2 @@
-msal
-requests
+msal==1.37.0
+requests==2.34.2
