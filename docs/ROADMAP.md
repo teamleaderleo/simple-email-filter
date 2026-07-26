@@ -10,12 +10,15 @@ The project will move in small, reviewable steps. Existing Junk filtering remain
 - [x] Add an audit-first Lambda sweeper.
 - [x] Batch moves to Deleted Items with retry handling.
 - [x] Add unit tests for policy validation and expiry behaviour.
-- [ ] Deploy an audit-only scheduled run and compare counts with the one-off cleanup report.
+- [x] Add resumable local Inbox audit, reporting and bounded apply commands for the historical backlog.
+- [ ] Run the full historical Inbox audit and tune private policies from the unmatched-sender report.
+- [ ] Deploy an audit-only scheduled run and compare counts with the historical cleanup report.
 
 ## Phase 2 — Shared runtime
 
-- [ ] Move existing token-cache code into the shared authentication module.
-- [ ] Move Graph request, pagination and retry logic into the shared client.
+- [ ] Move remaining token-cache code into the shared authentication module.
+- [ ] Move remaining Graph request and retry duplication into the shared client.
+- [x] Add shared paged folder scans, immutable IDs and detailed batch-move outcomes.
 - [x] Harden the current Junk webhook without changing its classification behaviour.
 - [x] Validate webhook `clientState` and use immutable message identifiers.
 - [x] Fetch the exact message referenced by each notification.
@@ -41,5 +44,4 @@ The project will move in small, reviewable steps. Existing Junk filtering remain
 - User flags or Outlook categories that permanently protect individual messages.
 - Per-sender retention suggestions derived from aggregate read behaviour.
 - A reversible quarantine period before Deleted Items.
-- Local CLI commands for rank, audit, apply and policy validation.
 - Exportable aggregate history without message content.
