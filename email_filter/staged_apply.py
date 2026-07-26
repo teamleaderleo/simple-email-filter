@@ -99,9 +99,12 @@ def apply_plan_selection(
     confirmation: str,
     limit: int = 500,
     policy_ids: set[str] | None = None,
+    workers: int = 1,
 ) -> dict[str, Any]:
     if confirmation != APPLY_CONFIRMATION:
         raise RuntimeError(f"Apply requires confirmation {APPLY_CONFIRMATION}")
+    if not 1 <= workers <= 8:
+        raise ValueError("workers must be between 1 and 8")
 
     summary = store.summary()
     if not summary.get("scanComplete"):
@@ -138,12 +141,14 @@ def apply_plan_selection(
             "remaining": status["selection"]["pending"],
             "remainingAll": status["allPlan"]["pending"],
             "byPolicy": status["selection"]["byPolicy"],
+            "workers": workers,
         }
 
     deleted_items_id = client.get_well_known_folder_id("deleteditems")
     outcomes = client.move_messages_detailed(
         pending,
         destination_folder_id=deleted_items_id,
+        max_workers=workers,
     )
     store.append_apply_outcomes(outcomes)
     status = plan_status(store, policy_ids=policy_ids)
@@ -156,4 +161,5 @@ def apply_plan_selection(
         "remaining": status["selection"]["pending"],
         "remainingAll": status["allPlan"]["pending"],
         "byPolicy": status["selection"]["byPolicy"],
+        "workers": workers,
     }
