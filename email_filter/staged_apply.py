@@ -12,16 +12,18 @@ def _selected_plan(
     policy_ids: set[str] | None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     plan = store.load_plan()
-    available = sorted({str(item.get("policyId") or "") for item in plan if item.get("policyId")})
+    planned = {str(item.get("policyId") or "") for item in plan if item.get("policyId")}
+    known = planned.union((store.summary().get("policies") or {}).keys())
+    available = sorted(known)
     if policy_ids is None:
-        return plan, available
+        return plan, sorted(planned)
 
-    unknown = sorted(policy_ids.difference(available))
+    unknown = sorted(policy_ids.difference(known))
     if unknown:
         raise RuntimeError(
             "Unknown policy ids: "
             + ", ".join(unknown)
-            + ". Available planned policies: "
+            + ". Available policies: "
             + ", ".join(available)
         )
     selected = [item for item in plan if str(item.get("policyId")) in policy_ids]
@@ -37,8 +39,14 @@ def plan_status(
     all_plan = store.load_plan()
     outcomes = store.completed_apply_outcomes()
 
-    def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
-        by_policy: dict[str, Counter[str]] = {}
+    def summarize(
+        items: list[dict[str, Any]],
+        *,
+        expected_policy_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        by_policy: dict[str, Counter[str]] = {
+            policy_id: Counter() for policy_id in (expected_policy_ids or ())
+        }
         totals: Counter[str] = Counter()
         for item in items:
             policy_id = str(item.get("policyId") or "")
@@ -76,7 +84,10 @@ def plan_status(
 
     return {
         "selectedPolicies": selected_policy_ids,
-        "selection": summarize(selected),
+        "selection": summarize(
+            selected,
+            expected_policy_ids=selected_policy_ids,
+        ),
         "allPlan": summarize(all_plan),
     }
 
