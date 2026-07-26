@@ -7,7 +7,7 @@ MAILBOX_EXPORT := bash scripts/mailbox-export.sh
 JUNK_BACKFILL := bash scripts/junk-backfill.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply mailbox-reset junk-backfill-audit junk-backfill-report junk-backfill-apply junk-backfill-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply-stage-all mailbox-apply mailbox-reset junk-backfill-audit junk-backfill-report junk-backfill-apply junk-backfill-reset
 
 help:
 	@$(LAMBDA_OPS) help
@@ -66,6 +66,9 @@ mailbox-plan:
 
 mailbox-apply-stage:
 	@$(MAILBOX_OPS) apply-stage
+
+mailbox-apply-stage-all:
+	@$(MAILBOX_OPS) apply-stage-all
 
 mailbox-apply:
 	@$(MAILBOX_OPS) apply

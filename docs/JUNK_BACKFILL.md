@@ -6,13 +6,15 @@ It handles **only messages still in the Junk Email folder**. It does not inspect
 
 ## Audit the gap
 
-Supply timestamps with a UTC offset. For the July 25, 2026 Pacific-time gap discussed during setup:
+Supply timestamps with a UTC offset. For July 26, 2026 from 8:00 through 11:00 a.m. Beijing time:
 
 ```bash
-JUNK_BACKFILL_START=2026-07-25T08:00:00-07:00 \
-JUNK_BACKFILL_END=2026-07-25T11:00:00-07:00 \
+JUNK_BACKFILL_START=2026-07-26T08:00:00+08:00 \
+JUNK_BACKFILL_END=2026-07-26T11:00:00+08:00 \
 make junk-backfill-audit
 ```
+
+That is July 26 from 00:00 through 03:00 UTC, or July 25 from 5:00 through 8:00 p.m. Pacific daylight time. The timestamps themselves are authoritative; the CLI normalises them to UTC.
 
 The audit:
 
@@ -47,8 +49,8 @@ The report shows:
 If `truncated` is true, increase the cap and rerun the audit before apply:
 
 ```bash
-JUNK_BACKFILL_START=2026-07-25T08:00:00-07:00 \
-JUNK_BACKFILL_END=2026-07-25T11:00:00-07:00 \
+JUNK_BACKFILL_START=2026-07-26T08:00:00+08:00 \
+JUNK_BACKFILL_END=2026-07-26T11:00:00+08:00 \
 JUNK_BACKFILL_MAX_MESSAGES=1000 \
 make junk-backfill-audit
 ```

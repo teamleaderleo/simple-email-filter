@@ -150,9 +150,9 @@ Required for audit:
   JUNK_BACKFILL_START=ISO timestamp with UTC offset
   JUNK_BACKFILL_END=ISO timestamp with UTC offset
 
-Example:
-  JUNK_BACKFILL_START=2026-07-25T08:00:00-07:00 \
-  JUNK_BACKFILL_END=2026-07-25T11:00:00-07:00 \
+Beijing-time example:
+  JUNK_BACKFILL_START=2026-07-26T08:00:00+08:00 \
+  JUNK_BACKFILL_END=2026-07-26T11:00:00+08:00 \
   make junk-backfill-audit
 
 Defaults:

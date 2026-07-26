@@ -101,8 +101,11 @@ class StagedApplyTests(unittest.TestCase):
                 confirmation=APPLY_CONFIRMATION,
                 limit=1,
                 policy_ids=selected,
+                workers=4,
             )
             self.assertEqual(client.moved_batches[0][0], ["bulk-a"])
+            self.assertEqual(client.moved_batches[0][1]["max_workers"], 4)
+            self.assertEqual(first["workers"], 4)
             self.assertEqual(first["remaining"], 1)
             self.assertEqual(first["remainingAll"], 2)
 
@@ -114,6 +117,7 @@ class StagedApplyTests(unittest.TestCase):
                 policy_ids=selected,
             )
             self.assertEqual(client.moved_batches[1][0], ["bulk-b"])
+            self.assertEqual(client.moved_batches[1][1]["max_workers"], 1)
             self.assertEqual(second["remaining"], 0)
             self.assertEqual(second["remainingAll"], 1)
 
@@ -126,6 +130,17 @@ class StagedApplyTests(unittest.TestCase):
                     store,
                     confirmation=APPLY_CONFIRMATION,
                     policy_ids={"not-a-policy"},
+                )
+
+    def test_worker_count_is_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._prepared_store(directory)
+            with self.assertRaisesRegex(ValueError, "workers"):
+                apply_plan_selection(
+                    FakeApplyClient([]),
+                    store,
+                    confirmation=APPLY_CONFIRMATION,
+                    workers=9,
                 )
 
 
