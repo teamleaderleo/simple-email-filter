@@ -11,6 +11,7 @@ subscription-package/
 backups/
 .build-cache/
 .mailbox-cleanup/
+.junk-backfill/
 
 # Node.js
 node_modules/

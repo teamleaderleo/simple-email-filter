@@ -19,6 +19,7 @@ printf '\n==> Checking Python syntax\n'
   webhook_handler.py \
   mailbox_cleanup.py \
   mailbox_export.py \
+  junk_backfill.py \
   setup_webhook.py \
   setup_token_interactive.py
 
@@ -28,6 +29,7 @@ bash -n \
   scripts/lambda-deploy.sh \
   scripts/mailbox-cleanup.sh \
   scripts/mailbox-export.sh \
+  scripts/junk-backfill.sh \
   scripts/test.sh
 
 printf '\n==> Tests passed\n'
