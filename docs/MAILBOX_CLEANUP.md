@@ -40,6 +40,48 @@ Print the latest report without contacting Microsoft:
 make mailbox-report
 ```
 
+## Reviewing unmatched mail
+
+Sender names alone are not enough for broad rules. The same sender can carry receipts, security alerts, order updates, recruiter messages, and marketing. Use the private local review command before adding a policy:
+
+```bash
+make mailbox-review
+```
+
+It reads the existing local snapshot and does not contact Microsoft. The output includes:
+
+- unmatched counts per sender
+- read and unread counts
+- first and last received dates
+- counts by year
+- redacted subject patterns
+- keyword signals for security, finance, purchase records, delivery, property/legal, job applications, and promotions
+- a manual-review flag when potentially important keywords appear
+
+The output does not contain message IDs, bodies, previews, or attachments. Obvious email addresses, URLs, long identifiers, UUIDs, and numbers in subjects are replaced before display.
+
+Review a single sender:
+
+```bash
+MAILBOX_REVIEW_SENDER=store-news@amazon.ca make mailbox-review
+```
+
+Review a whole domain:
+
+```bash
+MAILBOX_REVIEW_DOMAIN=linkedin.com make mailbox-review
+```
+
+Change the number of senders or subject patterns shown:
+
+```bash
+MAILBOX_REVIEW_TOP=40 \
+MAILBOX_REVIEW_SAMPLES=8 \
+make mailbox-review
+```
+
+The review command uses the policy path recorded in the latest audit, so unmatched results stay consistent with that plan.
+
 ## Local files and privacy
 
 The scan state is ignored by Git and written with private file permissions where the operating system supports them:
@@ -53,7 +95,7 @@ The scan state is ignored by Git and written with private file permissions where
 └── apply-results.jsonl
 ```
 
-The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are needed to evaluate policies. It does not contain message bodies, previews or attachments.
+The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are needed to evaluate policies. It does not contain message bodies, previews or attachments. Do not upload `messages.jsonl`; share the summary or redacted review output instead.
 
 ## Interrupted scans
 
@@ -81,13 +123,13 @@ The checked-in example policy is safe for audit but intentionally blocked from a
 cp policies/personal.example.json policies/personal.json
 ```
 
-Then rebuild the report using the private policy:
+Then edit the private policy and rebuild the report:
 
 ```bash
 MAILBOX_POLICY_PATH=policies/personal.json make mailbox-audit
 ```
 
-When the summary looks correct:
+When the summary and unmatched review look correct:
 
 ```bash
 MAILBOX_POLICY_PATH=policies/personal.json make mailbox-apply
