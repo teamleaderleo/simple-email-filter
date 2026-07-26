@@ -143,14 +143,26 @@ run_prepare_apply() {
     note "Using the existing private apply policy at $PRIVATE_POLICY_PATH"
   fi
 
+  local summary_json
   note "Rebuilding the plan locally from the saved snapshot; Microsoft is not contacted"
-  .venv/bin/python mailbox_cleanup.py \
+  summary_json="$(.venv/bin/python mailbox_cleanup.py \
     --state-dir "$STATE_DIR" \
     replan \
     --policy "$PRIVATE_POLICY_PATH" \
-    --top "$TOP_COUNT"
+    --top "$TOP_COUNT")"
+  printf '%s' "$summary_json" | .venv/bin/python -c '
+import json, sys
+summary = json.load(sys.stdin)
+print(json.dumps({
+    "policyPath": summary.get("policyPath"),
+    "scanned": summary.get("scanned", 0),
+    "protectedForever": summary.get("protectedForever", 0),
+    "keptByRetention": summary.get("keptByRetention", 0),
+    "selected": summary.get("selected", 0),
+    "unmatched": summary.get("unmatched", 0),
+}, indent=2, sort_keys=True))
+'
 
-  POLICY_PATH="$PRIVATE_POLICY_PATH"
   run_plan
 }
 
