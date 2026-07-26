@@ -130,11 +130,18 @@ def audit(args: argparse.Namespace) -> int:
         truncated=truncated,
         progress=progress,
     )
+    plan["truncated"] = truncated
     store.write_plan(plan)
     summary["stateDir"] = str(Path(args.state_dir))
     store.write_summary(summary)
     _print(summary)
-    return 2 if truncated else 0
+    if truncated:
+        print(
+            "ERROR: The window exceeded JUNK_BACKFILL_MAX_MESSAGES. "
+            "Increase the cap and rerun the audit before apply."
+        )
+        return 2
+    return 0
 
 
 def report(args: argparse.Namespace) -> int:
@@ -147,8 +154,23 @@ def report(args: argparse.Namespace) -> int:
 
 def apply(args: argparse.Namespace) -> int:
     store = JunkBackfillStore(args.state_dir)
+    saved_plan = store.plan()
+    if saved_plan.get("truncated") is True:
+        raise RuntimeError(
+            "Apply refuses a truncated Junk audit. Increase the audit message cap and "
+            "rerun it before deleting anything."
+        )
+
     session, refresh = _graph_session()
     junk_id = get_junk_folder_id(session, token_refresher=refresh)
+
+    def delete_one(message_id: str) -> str:
+        try:
+            return delete_message(session, message_id, token_refresher=refresh)
+        except Exception as exc:
+            print(f"Delete failed for one planned Junk message: {exc}")
+            raise
+
     result = apply_plan(
         store,
         confirmation=args.confirm,
@@ -158,11 +180,7 @@ def apply(args: argparse.Namespace) -> int:
             message_id,
             token_refresher=refresh,
         ),
-        delete=lambda message_id: delete_message(
-            session,
-            message_id,
-            token_refresher=refresh,
-        ),
+        delete=delete_one,
         already_processed=webhook_handler.already_processed,
         mark_processed=webhook_handler.mark_processed,
         limit=args.limit,
