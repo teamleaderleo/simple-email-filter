@@ -165,6 +165,9 @@ doctor() {
     has_command "$command_name" || die "Missing required command: $command_name"
   done
 
+  docker info >/dev/null 2>&1 \
+    || die "Docker is installed but not running. Start Docker Desktop and rerun the command."
+
   ensure_venv
 
   note "Checking AWS login and deployed resources"
@@ -181,7 +184,7 @@ doctor() {
   local variable_names
   variable_names="$(aws_cmd lambda get-function-configuration \
     --function-name "$WEBHOOK_FUNCTION" \
-    --query 'keys(Environment.Variables)' \
+    --query "join(' ', keys(Environment.Variables))" \
     --output text)"
 
   local required_name
