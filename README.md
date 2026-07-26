@@ -18,6 +18,16 @@ make deploy-webhook
 
 That command checks the local machine and AWS resources, repairs the Python environment, runs tests, backs up the deployed Lambda, builds matching Linux dependencies, updates code without replacing secrets, refreshes Microsoft authentication only when needed, and recreates the secured Graph subscription.
 
+When Junk Guard was unavailable for a bounded period, audit only the messages still in Junk during that window with the live rules and Gemma classifier:
+
+```bash
+JUNK_BACKFILL_START=2026-07-25T08:00:00-07:00 \
+JUNK_BACKFILL_END=2026-07-25T11:00:00-07:00 \
+make junk-backfill-audit
+```
+
+The audit deletes nothing and saves a private local plan. Review it with `make junk-backfill-report`, then apply only saved DELETE decisions with `make junk-backfill-apply`. See [Junk notification gap backfill](docs/JUNK_BACKFILL.md).
+
 For a large existing Inbox, start with the non-destructive historical audit:
 
 ```bash
@@ -64,6 +74,10 @@ make microsoft-login        Force a Microsoft browser login
 make status                 Show deployment status without secrets
 make logs-webhook           Follow webhook logs
 make upgrade-runtime        Upgrade both email Lambdas to Python 3.14
+make junk-backfill-audit    Audit a bounded Junk notification gap with live rules and Gemma
+make junk-backfill-report   Print the saved private gap plan and apply status
+make junk-backfill-apply    Delete only saved DELETE decisions still in Junk
+make junk-backfill-reset    Delete only private local Junk backfill state
 make mailbox-audit          Scan/resume Inbox and build a non-destructive report
 make mailbox-report         Print the latest local mailbox report
 make mailbox-review         Inspect unmatched senders and redacted subject patterns
@@ -82,6 +96,9 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Junk Guard deletes only messages already in Junk and keeps uncertain classifications.
 - Webhook notifications must match the stored subscription ID and client state.
 - Notifications are processed by exact immutable Outlook message ID.
+- Junk gap backfill is bounded by explicit timestamps and fetches only messages still in Junk.
+- Junk gap audit mode deletes nothing and reuses the deployed Lambda's live classifier configuration without printing or saving its API token.
+- Junk gap apply uses only saved DELETE decisions, rechecks the exact message and Junk folder, and refuses truncated audits.
 - Historical cleanup audit mode moves nothing and checkpoints after complete pages.
 - Historical cleanup review mode is local-only and redacts obvious subject identifiers.
 - Historical cleanup exports contain aggregate sender data and redacted subject patterns, not raw message-level content.
@@ -97,13 +114,15 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 ## Repository map
 
 ```text
-email_filter/                 shared auth, Graph, policy, review, export and retention code
+email_filter/                 shared auth, Graph, policy, review, export, backfill and retention code
 handlers/                     Lambda handlers, including the retention sweeper
 policies/                     checked-in example policies; personal policies are ignored
 scripts/email-filter.sh       local authentication and AWS operations
 scripts/lambda-deploy.sh      cached Lambda packaging and deployment
+scripts/junk-backfill.sh      bounded Junk notification gap audit/apply operations
 scripts/mailbox-cleanup.sh    resumable historical mailbox operations
 scripts/mailbox-export.sh     uploadable mailbox analysis package
+junk_backfill.py              Junk gap audit/report/apply CLI
 mailbox_cleanup.py            historical audit/report/review/plan/apply CLI
 mailbox_export.py             local JSON/CSV/XLSX export CLI
 webhook_handler.py            deployed Junk Guard webhook
@@ -127,6 +146,7 @@ The webhook package is built inside the official Python Docker image for the dep
 ## Documentation
 
 - [Operations](docs/OPERATIONS.md)
+- [Junk notification gap backfill](docs/JUNK_BACKFILL.md)
 - [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Retention policies](docs/RETENTION_POLICIES.md)
@@ -134,4 +154,4 @@ The webhook package is built inside the official Python Docker image for the dep
 
 ## Current roadmap
 
-The historical audit, review, analysis export and staged apply workflow now handle the existing backlog locally. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The Junk Guard webhook, bounded gap replay, historical audit, analysis export and staged apply workflow now cover both notification outages and the existing backlog. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
