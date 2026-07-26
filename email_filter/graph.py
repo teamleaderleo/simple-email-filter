@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -19,24 +20,71 @@ def _graph_timestamp(value: datetime) -> str:
     return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _graph_error_detail(response: Any) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = str(error.get("code") or "").strip()
+            message = str(error.get("message") or "").strip()
+            if code and message:
+                return f"{code}: {message}"
+            return code or message
+    text = str(getattr(response, "text", "") or "").strip()
+    return text[:500]
+
+
 class GraphClient:
-    def __init__(self, access_token: str, session: requests.Session | None = None):
+    def __init__(
+        self,
+        access_token: str,
+        session: requests.Session | None = None,
+        token_refresher: Callable[[], str] | None = None,
+    ):
         self.session = session or requests.Session()
+        self.token_refresher = token_refresher
+        self._set_access_token(access_token)
         self.session.headers.update(
             {
-                "Authorization": f"Bearer {access_token}",
                 "Accept": "application/json",
                 "Prefer": 'IdType="ImmutableId"',
             }
         )
 
+    def _set_access_token(self, access_token: str) -> None:
+        self.session.headers.update({"Authorization": f"Bearer {access_token}"})
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> Any:
+        sender = getattr(self.session, method)
+        response = sender(url, **kwargs)
+        if response.status_code == 401 and self.token_refresher is not None:
+            refreshed_token = self.token_refresher()
+            self._set_access_token(refreshed_token)
+            response = sender(url, **kwargs)
+
+        if response.status_code >= 400:
+            detail = _graph_error_detail(response)
+            try:
+                response.raise_for_status()
+            except Exception as exc:
+                if detail:
+                    raise RuntimeError(
+                        f"Microsoft Graph request failed with HTTP "
+                        f"{response.status_code}: {detail}"
+                    ) from exc
+                raise
+        return response
+
     def get_well_known_folder_id(self, name: str) -> str:
-        response = self.session.get(
+        response = self._request(
+            "get",
             f"{GRAPH_ROOT}/me/mailFolders/{quote(name, safe='')}",
             params={"$select": "id"},
             timeout=30,
         )
-        response.raise_for_status()
         return str(response.json()["id"])
 
     def iter_folder_message_pages(
@@ -80,8 +128,7 @@ class GraphClient:
 
         pages = 0
         while url:
-            response = self.session.get(url, params=params, timeout=60)
-            response.raise_for_status()
+            response = self._request("get", url, params=params, timeout=60)
             payload = response.json()
             messages = [
                 MailMessage.from_graph(raw_message)
@@ -116,8 +163,7 @@ class GraphClient:
         yielded = 0
 
         while url and yielded < max_messages:
-            response = self.session.get(url, params=params, timeout=60)
-            response.raise_for_status()
+            response = self._request("get", url, params=params, timeout=60)
             payload = response.json()
 
             for raw_message in payload.get("value", []):
@@ -156,13 +202,13 @@ class GraphClient:
                     }
                     for index, message_id in enumerate(pending)
                 ]
-                response = self.session.post(
+                response = self._request(
+                    "post",
                     f"{GRAPH_ROOT}/$batch",
                     headers={"Content-Type": "application/json"},
                     data=json.dumps({"requests": requests_payload}),
                     timeout=90,
                 )
-                response.raise_for_status()
                 subresponses = response.json().get("responses", [])
 
                 retry_ids: list[str] = []
