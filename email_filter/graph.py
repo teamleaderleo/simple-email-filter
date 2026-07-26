@@ -37,6 +37,12 @@ def _graph_error_detail(response: Any) -> str:
     return text[:500]
 
 
+def _default_token_refresher() -> str:
+    from .auth import acquire_access_token
+
+    return acquire_access_token(force_refresh=True)
+
+
 class GraphClient:
     def __init__(
         self,
@@ -45,7 +51,7 @@ class GraphClient:
         token_refresher: Callable[[], str] | None = None,
     ):
         self.session = session or requests.Session()
-        self.token_refresher = token_refresher
+        self.token_refresher = token_refresher or _default_token_refresher
         self._set_access_token(access_token)
         self.session.headers.update(
             {
@@ -60,7 +66,7 @@ class GraphClient:
     def _request(self, method: str, url: str, **kwargs: Any) -> Any:
         sender = getattr(self.session, method)
         response = sender(url, **kwargs)
-        if response.status_code == 401 and self.token_refresher is not None:
+        if response.status_code == 401:
             refreshed_token = self.token_refresher()
             self._set_access_token(refreshed_token)
             response = sender(url, **kwargs)
