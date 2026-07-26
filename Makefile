@@ -4,9 +4,10 @@ OPS := bash scripts/email-filter.sh
 LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
 MAILBOX_EXPORT := bash scripts/mailbox-export.sh
+JUNK_BACKFILL := bash scripts/junk-backfill.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply mailbox-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-prepare-apply mailbox-plan mailbox-apply-stage mailbox-apply mailbox-reset junk-backfill-audit junk-backfill-report junk-backfill-apply junk-backfill-reset
 
 help:
 	@$(LAMBDA_OPS) help
@@ -15,6 +16,8 @@ help:
 	@echo
 	@echo "Analysis export"
 	@echo "  make mailbox-export  Build uploadable JSON, CSV and Excel analysis files"
+	@echo
+	@$(JUNK_BACKFILL) help
 
 bootstrap:
 	@$(OPS) bootstrap
@@ -69,3 +72,15 @@ mailbox-apply:
 
 mailbox-reset:
 	@$(MAILBOX_OPS) reset
+
+junk-backfill-audit:
+	@$(JUNK_BACKFILL) audit
+
+junk-backfill-report:
+	@$(JUNK_BACKFILL) report
+
+junk-backfill-apply:
+	@$(JUNK_BACKFILL) apply
+
+junk-backfill-reset:
+	@$(JUNK_BACKFILL) reset
