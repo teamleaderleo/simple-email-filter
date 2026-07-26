@@ -3,14 +3,18 @@ SHELL := /bin/bash
 OPS := bash scripts/email-filter.sh
 LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
+MAILBOX_EXPORT := bash scripts/mailbox-export.sh
 TEST_OPS := bash scripts/test.sh
 
-.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-apply mailbox-reset
+.PHONY: help bootstrap doctor test status microsoft-login setup-webhook deploy-webhook upgrade-runtime logs-webhook mailbox-audit mailbox-report mailbox-review mailbox-export mailbox-apply mailbox-reset
 
 help:
 	@$(LAMBDA_OPS) help
 	@echo
 	@$(MAILBOX_OPS) help
+	@echo
+	@echo "Analysis export"
+	@echo "  make mailbox-export  Build uploadable JSON, CSV and Excel analysis files"
 
 bootstrap:
 	@$(OPS) bootstrap
@@ -47,6 +51,9 @@ mailbox-report:
 
 mailbox-review:
 	@$(MAILBOX_OPS) review
+
+mailbox-export:
+	@$(MAILBOX_EXPORT)
 
 mailbox-apply:
 	@$(MAILBOX_OPS) apply

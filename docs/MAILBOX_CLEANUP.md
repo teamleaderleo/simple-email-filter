@@ -56,9 +56,9 @@ It reads the existing local snapshot and does not contact Microsoft. The output 
 - counts by year
 - redacted subject patterns
 - keyword signals for security, finance, purchase records, delivery, property/legal, job applications, and promotions
-- a manual-review flag when potentially important keywords appear
+- a manual-review flag when repeated potentially important signals appear
 
-The output does not contain message IDs, bodies, previews, or attachments. Obvious email addresses, URLs, long identifiers, UUIDs, and numbers in subjects are replaced before display.
+The output does not contain message IDs, bodies, previews or attachments. Obvious email addresses, URLs, long identifiers, UUIDs and numbers in subjects are replaced before display.
 
 Review a single sender:
 
@@ -82,6 +82,57 @@ make mailbox-review
 
 The review command uses the policy path recorded in the latest audit, so unmatched results stay consistent with that plan.
 
+## Exporting an analysis package
+
+Use the export command instead of pasting a large JSON report into chat:
+
+```bash
+make mailbox-export
+```
+
+The export is local-only. It rebuilds the audit plan from the saved snapshot using the current policy file, so policy edits are reflected without another Microsoft Graph scan. It writes:
+
+```text
+.mailbox-cleanup/inbox/export/
+├── mailbox-analysis.xlsx
+├── mailbox-summary.json
+├── sender-summary.csv
+├── policy-impact.csv
+├── unmatched-senders.csv
+├── subject-patterns.csv
+├── unmatched-review.json
+├── manifest.json
+└── README.txt
+```
+
+`mailbox-analysis.xlsx` contains these sheets:
+
+- **Overview** — audit totals, policy path and privacy declaration
+- **Policy Impact** — matched, protected, retained and selected counts per policy
+- **Sender Summary** — one aggregate row per sender
+- **Unmatched Senders** — aggregate signals and review flags
+- **Subject Patterns** — redacted patterns grouped by sender
+- **Data Dictionary** — file descriptions and upload guidance
+
+The workbook has frozen headers, filters, sensible column widths and percentage formatting. CSV files use UTF-8 with a byte-order mark so Excel opens sender names and symbols correctly.
+
+The export contains sender addresses, domains, aggregate counts and redacted subject patterns. It contains no message IDs, bodies, previews, attachments or raw subjects. The most useful upload pair is:
+
+```text
+mailbox-analysis.xlsx
+mailbox-summary.json
+```
+
+Change the output path or number of patterns retained per unmatched sender:
+
+```bash
+MAILBOX_EXPORT_DIR="$HOME/Desktop/mailbox-analysis" \
+MAILBOX_EXPORT_SAMPLES=8 \
+make mailbox-export
+```
+
+Export refuses incomplete scans because rolling retention rules require the full folder history. It also refuses to rebuild a plan after message moves have started in that state directory.
+
 ## Local files and privacy
 
 The scan state is ignored by Git and written with private file permissions where the operating system supports them:
@@ -92,10 +143,11 @@ The scan state is ignored by Git and written with private file permissions where
 ├── messages.jsonl
 ├── plan.jsonl
 ├── summary.json
+├── export/
 └── apply-results.jsonl
 ```
 
-The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are needed to evaluate policies. It does not contain message bodies, previews or attachments. Do not upload `messages.jsonl`; share the summary or redacted review output instead.
+The local snapshot contains message IDs, sender addresses, subjects, timestamps, read state and categories because those fields are needed to evaluate policies. It does not contain message bodies, previews or attachments. Do not upload `messages.jsonl`, `plan.jsonl` or `apply-results.jsonl`; upload files from the `export/` directory instead.
 
 ## Interrupted scans
 
@@ -123,10 +175,10 @@ The checked-in example policy is safe for audit but intentionally blocked from a
 cp policies/personal.example.json policies/personal.json
 ```
 
-Then edit the private policy and rebuild the report:
+Then edit the private policy and rebuild the report or export:
 
 ```bash
-MAILBOX_POLICY_PATH=policies/personal.json make mailbox-audit
+MAILBOX_POLICY_PATH=policies/personal.json make mailbox-export
 ```
 
 When the summary and unmatched review look correct:
@@ -179,7 +231,7 @@ MAILBOX_STATE_DIR=.mailbox-cleanup/archive \
 make mailbox-audit
 ```
 
-Use a separate state directory per folder.
+Use a separate state directory per folder. Export uses the same state directory and writes its own `export/` child directory.
 
 ## Relationship to scheduled retention
 
