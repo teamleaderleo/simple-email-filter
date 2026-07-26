@@ -68,7 +68,7 @@
       "description": "Daily digests are enjoyable briefly, then expire.",
       "priority": 30,
       "match": {"senders": ["notifications@artstation.com"]},
-      "retention": {"mode": "days", "days": 60}
+      "retention": {"mode": "days", "days": 45}
     },
     {
       "id": "job-alerts",
