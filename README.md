@@ -1,8 +1,9 @@
 # Simple Email Filter for Outlook
 
-A personal Outlook automation project with two related jobs:
+A personal Outlook automation project with three related jobs:
 
 - **Junk Guard** processes messages Outlook has already placed in Junk. It uses conservative deterministic checks and a Cloudflare Workers AI fallback, keeping uncertain mail.
+- **Historical Cleanup** audits a large existing folder, checkpoints every page, reports retention candidates, and can move a bounded reviewed batch to Deleted Items.
 - **Mailbox Retention** lets ordinary mail arrive normally, then identifies categories that may be moved to Deleted Items after an explicit retention period. Retention currently defaults to audit mode.
 
 ## Routine operations
@@ -17,6 +18,14 @@ make deploy-webhook
 
 That command checks the local machine and AWS resources, repairs the Python environment, runs tests, backs up the deployed Lambda, builds matching Linux dependencies, updates code without replacing secrets, refreshes Microsoft authentication only when needed, and recreates the secured Graph subscription.
 
+For a large existing Inbox, start with the non-destructive historical audit:
+
+```bash
+make mailbox-audit
+```
+
+The audit scans or resumes the Inbox, writes private local checkpoints, and produces counts for protected, retained, eligible, and unmatched messages. It moves nothing. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
+
 Useful commands:
 
 ```text
@@ -28,39 +37,49 @@ make setup-webhook    Recreate only the Microsoft Graph subscription
 make microsoft-login  Force a Microsoft browser login
 make status           Show deployment status without secrets
 make logs-webhook     Follow webhook logs
-make upgrade-runtime  Explicitly upgrade the webhook Lambda to Python 3.14
+make upgrade-runtime  Upgrade both email Lambdas to Python 3.14
+make mailbox-audit    Scan/resume Inbox and build a non-destructive report
+make mailbox-report   Print the latest local mailbox report
+make mailbox-apply    Move a bounded reviewed batch to Deleted Items
+make mailbox-reset    Delete only the private local cleanup state
 ```
 
-See [Operations](docs/OPERATIONS.md) for first-time setup, rollback and troubleshooting.
+See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubleshooting.
 
 ## Safety defaults
 
 - Junk Guard deletes only messages already in Junk and keeps uncertain classifications.
 - Webhook notifications must match the stored subscription ID and client state.
 - Notifications are processed by exact immutable Outlook message ID.
+- Historical cleanup audit mode moves nothing and checkpoints after complete pages.
+- Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
+- Historical cleanup applies at most 500 messages per run unless explicitly overridden.
 - The retention service defaults to audit mode.
 - Retention apply mode requires an explicit confirmation value.
 - The retention Graph client exposes moves to Deleted Items, not permanent deletion.
 - Deployment uses code-only Lambda updates so existing Microsoft and Cloudflare environment variables are preserved.
-- Message bodies and attachments are not stored for dashboard activity.
+- Message bodies and attachments are not stored for dashboard activity or cleanup reports.
 
 ## Repository map
 
 ```text
-email_filter/              shared auth, Graph, policy and retention code
-handlers/                  Lambda handlers, including the retention sweeper
-policies/                  checked-in example policies; personal policies are ignored
-scripts/email-filter.sh    consolidated macOS/AWS operations
-webhook_handler.py         deployed Junk Guard webhook
-setup_webhook.py           secured Graph subscription setup
-setup_token_interactive.py Microsoft browser authentication and cache refresh
-docs/                      architecture, operations, policies and roadmap
-tests/                     unit tests
+email_filter/                 shared auth, Graph, policy and retention code
+handlers/                     Lambda handlers, including the retention sweeper
+policies/                     checked-in example policies; personal policies are ignored
+scripts/email-filter.sh       local authentication and AWS operations
+scripts/lambda-deploy.sh      cached Lambda packaging and deployment
+scripts/mailbox-cleanup.sh    resumable historical mailbox operations
+mailbox_cleanup.py            historical audit/report/apply CLI
+webhook_handler.py            deployed Junk Guard webhook
+setup_webhook.py              secured Graph subscription setup
+setup_token_interactive.py    Microsoft browser authentication and cache refresh
+docs/                         architecture, operations, cleanup, policies and roadmap
+tests/                        unit tests
 ```
 
 ## Development
 
-Local development targets Python 3.14. CI currently runs on Python 3.11 and 3.14 while the live Lambda runtime is transitioned deliberately.
+Local development targets Python 3.14. CI currently runs on Python 3.11 and 3.14 while compatibility with existing deployments is maintained.
 
 ```bash
 make bootstrap
@@ -72,10 +91,11 @@ The webhook package is built inside the official Python Docker image for the dep
 ## Documentation
 
 - [Operations](docs/OPERATIONS.md)
+- [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Retention policies](docs/RETENTION_POLICIES.md)
 - [Roadmap](docs/ROADMAP.md)
 
 ## Current roadmap
 
-The immediate operational milestone is a stable Junk Guard deployment with one-command updates. Next work includes an audit-only scheduled retention deployment, mailbox-wide observe-only ingestion, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The historical audit now handles the existing backlog locally. Next work includes an audit-only scheduled retention deployment, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
