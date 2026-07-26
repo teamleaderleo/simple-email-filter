@@ -26,6 +26,7 @@ CLEAN_MAX_PASSES="${MAILBOX_CLEAN_MAX_PASSES:-20}"
 OPEN_EXPORT="${MAILBOX_OPEN_EXPORT:-0}"
 FORCE_TESTS="${MAILBOX_FORCE_TESTS:-0}"
 TEST_STAMP="$STATE_DIR/.tested-commit"
+AUTH_CHECKED=0
 
 export AWS_PROFILE AWS_REGION AWS_DEFAULT_REGION AWS_PAGER
 export MAILBOX_STATE_DIR="$STATE_DIR"
@@ -87,6 +88,7 @@ ensure_client_id() {
 }
 
 check_auth() {
+  (( AUTH_CHECKED == 0 )) || return
   has_command aws || die "AWS CLI v2 is required."
   local arn
   arn="$(aws_cmd sts get-caller-identity --query Arn --output text 2>/dev/null)" \
@@ -102,14 +104,22 @@ check_auth() {
     .venv/bin/python setup_token_interactive.py --check \
       || die "Microsoft authentication still failed after browser login."
   fi
+  AUTH_CHECKED=1
 }
 
 run_cached_tests() {
   mkdir -p "$STATE_DIR"
   chmod 700 "$STATE_DIR" 2>/dev/null || true
-  local head tested=""
+  local head tested="" dirty=""
   head="$(git rev-parse HEAD)"
   [[ -f "$TEST_STAMP" ]] && tested="$(cat "$TEST_STAMP")"
+  dirty="$(git status --porcelain --untracked-files=normal)"
+
+  if [[ -n "$dirty" ]]; then
+    note "The working tree has uncommitted changes; running tests without caching the result"
+    bash scripts/test.sh
+    return
+  fi
 
   if [[ "$FORCE_TESTS" != "1" && "$tested" == "$head" ]]; then
     note "Tests already passed for commit ${head:0:12}; skipping duplicate run"
@@ -123,7 +133,7 @@ run_cached_tests() {
 
 run_local_check() {
   local command_name
-  for command_name in git aws make; do
+  for command_name in git make; do
     has_command "$command_name" || die "Missing required command: $command_name"
   done
   ensure_local_python
@@ -154,7 +164,7 @@ PY
 }
 
 apply_started() {
-  [[ -s "$STATE_DIR/apply-results.jsonl" ]]
+  [[ -e "$STATE_DIR/apply-results.jsonl" ]]
 }
 
 ensure_snapshot() {
@@ -181,8 +191,13 @@ ensure_apply_plan() {
 
 run_export() {
   note "Refreshing the privacy-minimised analysis and apply-progress exports"
-  MAILBOX_STATE_DIR="$STATE_DIR" MAILBOX_EXPORT_DIR="$EXPORT_DIR" \
-    bash scripts/mailbox-export.sh
+  if apply_started; then
+    MAILBOX_POLICY_PATH="" MAILBOX_STATE_DIR="$STATE_DIR" MAILBOX_EXPORT_DIR="$EXPORT_DIR" \
+      bash scripts/mailbox-export.sh
+  else
+    MAILBOX_STATE_DIR="$STATE_DIR" MAILBOX_EXPORT_DIR="$EXPORT_DIR" \
+      bash scripts/mailbox-export.sh
+  fi
 }
 
 open_export_if_requested() {
@@ -229,7 +244,8 @@ run_clean() {
   run_export
   require_integer_between MAILBOX_CLEAN_MAX_PASSES "$CLEAN_MAX_PASSES" 1 100
 
-  local all_preview all_pending
+  local all_preview all_pending confirmation stage pass before after
+  local -a stages=()
   all_preview="$(plan_for_stage all)"
   printf '%s\n' "$all_preview"
   all_pending="$(printf '%s' "$all_preview" | pending_from_json)"
@@ -239,7 +255,6 @@ run_clean() {
     return
   fi
 
-  stages=()
   while IFS= read -r stage; do
     [[ -n "$stage" ]] && stages+=("$stage")
   done < <(stage_list)
@@ -261,7 +276,6 @@ run_clean() {
   }
   trap final_export EXIT
 
-  local stage pass before after
   for stage in "${stages[@]}"; do
     pass=0
     while (( pass < CLEAN_MAX_PASSES )); do
