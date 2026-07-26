@@ -39,4 +39,6 @@ note "Building JSON, CSV and Excel analysis files from the private local snapsho
 note "Export complete"
 printf 'Upload for analysis:\n  %s/mailbox-analysis.xlsx\n  %s/mailbox-summary.json\n' \
   "$OUTPUT_DIR" "$OUTPUT_DIR"
+printf 'Apply progress:\n  %s/apply-progress.json\n  %s/apply-progress.csv\n' \
+  "$OUTPUT_DIR" "$OUTPUT_DIR"
 printf '\nDo not upload %s/messages.jsonl or other message-level state files.\n' "$STATE_DIR"
