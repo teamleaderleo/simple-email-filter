@@ -219,33 +219,44 @@ The preview reports totals, pending messages, moved messages, messages no longer
 
 ## Applying a stage
 
-After reviewing the preview:
+For one bounded chunk:
 
 ```bash
 make mailbox-apply-stage
 ```
 
-The command prints the same stage preview and asks you to type:
+The command prints the stage preview and asks for `MOVE_TO_DELETED_ITEMS`. The default chunk size is 5,000 messages.
 
-```text
-MOVE_TO_DELETED_ITEMS
-```
-
-A staged run moves at most 5,000 messages by default. It records an outcome for every message, retries earlier failures on a later run and resumes the same selection when the command is repeated. A message already moved or no longer found is treated as complete.
-
-Continue the selected stage by rerunning the same command:
+For a large reviewed stage, confirm once and let the command continue through checkpointed chunks:
 
 ```bash
-make mailbox-apply-stage
+make mailbox-apply-stage-all
 ```
 
-Change the stage or batch cap for one run:
+The continuous command defaults to:
+
+- 5,000 messages per checkpointed chunk
+- 30,000 attempted messages per invocation
+- four concurrent Microsoft Graph batch workers
+- one-second spacing between chunks
+
+It stops immediately when the stage finishes, a chunk reports failures, no progress is made, or the total-run cap is reached. Completed and missing outcomes are saved after every chunk, so rerunning the command resumes the same selection.
+
+Use a smaller total cap or lower concurrency when Microsoft throttles requests:
 
 ```bash
-MAILBOX_APPLY_STAGE=newsletters \
-MAILBOX_STAGE_LIMIT=2000 \
-make mailbox-apply-stage
+MAILBOX_STAGE_RUN_LIMIT=10000 \
+MAILBOX_GRAPH_WORKERS=2 \
+make mailbox-apply-stage-all
 ```
+
+Use another stage:
+
+```bash
+MAILBOX_APPLY_STAGE=newsletters make mailbox-apply-stage-all
+```
+
+`MAILBOX_GRAPH_WORKERS` is bounded from 1 through 8. Each Graph request still contains at most 20 message moves; workers run independent batch requests concurrently. A message already moved or no longer found is treated as complete, while failed outcomes remain eligible for retry.
 
 The older `make mailbox-apply` command remains available for the whole plan and uses a 500-message default cap. Named stages are easier to review and track.
 
