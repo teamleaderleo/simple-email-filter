@@ -3,6 +3,7 @@ SHELL := /bin/bash
 OPS := bash scripts/email-filter.sh
 LAMBDA_OPS := bash scripts/lambda-deploy.sh
 MAILBOX_OPS := bash scripts/mailbox-cleanup.sh
+MAILBOX_CONTINUOUS := bash scripts/mailbox-apply-stage-all.sh
 MAILBOX_EXPORT := bash scripts/mailbox-export.sh
 JUNK_BACKFILL := bash scripts/junk-backfill.sh
 TEST_OPS := bash scripts/test.sh
@@ -68,7 +69,7 @@ mailbox-apply-stage:
 	@$(MAILBOX_OPS) apply-stage
 
 mailbox-apply-stage-all:
-	@$(MAILBOX_OPS) apply-stage-all
+	@$(MAILBOX_CONTINUOUS)
 
 mailbox-apply:
 	@$(MAILBOX_OPS) apply
