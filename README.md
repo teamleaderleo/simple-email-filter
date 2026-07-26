@@ -18,11 +18,11 @@ make deploy-webhook
 
 That command checks the local machine and AWS resources, repairs the Python environment, runs tests, backs up the deployed Lambda, builds matching Linux dependencies, updates code without replacing secrets, refreshes Microsoft authentication only when needed, and recreates the secured Graph subscription.
 
-When Junk Guard was unavailable for a bounded period, audit only the messages still in Junk during that window with the live rules and Gemma classifier:
+When Junk Guard was unavailable for a bounded period, audit only the messages still in Junk during that window with the live rules and Gemma classifier. Timestamps carry their own offset; this example is July 26, 8:00–11:00 a.m. Beijing time:
 
 ```bash
-JUNK_BACKFILL_START=2026-07-25T08:00:00-07:00 \
-JUNK_BACKFILL_END=2026-07-25T11:00:00-07:00 \
+JUNK_BACKFILL_START=2026-07-26T08:00:00+08:00 \
+JUNK_BACKFILL_END=2026-07-26T11:00:00+08:00 \
 make junk-backfill-audit
 ```
 
@@ -54,39 +54,40 @@ After the policy review is complete, prepare the ignored private policy and prev
 make mailbox-prepare-apply
 ```
 
-Then apply the selected stage in resumable batches of up to 5,000 messages:
+For one bounded chunk, run `make mailbox-apply-stage`. To confirm once and continue checkpointed chunks until the selected stage is complete or the 30,000-message run cap is reached:
 
 ```bash
-make mailbox-apply-stage
+make mailbox-apply-stage-all
 ```
 
-Named stages separate high-volume bulk mail, reviewed newsletters, and operational notifications. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
+The default uses four concurrent Graph batch workers. Named stages separate high-volume bulk mail, reviewed newsletters, and operational notifications. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
 
 Useful commands:
 
 ```text
-make bootstrap              Create the Python 3.14 development environment
-make doctor                 Check AWS login, resources and Lambda configuration
-make test                   Run tests and syntax checks
-make deploy-webhook         Perform the complete safe webhook update
-make setup-webhook          Recreate only the Microsoft Graph subscription
-make microsoft-login        Force a Microsoft browser login
-make status                 Show deployment status without secrets
-make logs-webhook           Follow webhook logs
-make upgrade-runtime        Upgrade both email Lambdas to Python 3.14
-make junk-backfill-audit    Audit a bounded Junk notification gap with live rules and Gemma
-make junk-backfill-report   Print the saved private gap plan and apply status
-make junk-backfill-apply    Delete only saved DELETE decisions still in Junk
-make junk-backfill-reset    Delete only private local Junk backfill state
-make mailbox-audit          Scan/resume Inbox and build a non-destructive report
-make mailbox-report         Print the latest local mailbox report
-make mailbox-review         Inspect unmatched senders and redacted subject patterns
-make mailbox-export         Build uploadable JSON, CSV and Excel analysis files
-make mailbox-prepare-apply  Create the private policy and rebuild the local plan
-make mailbox-plan           Preview a named stage or exact policy selection
-make mailbox-apply-stage    Move up to 5,000 messages from one reviewed stage
-make mailbox-apply          Legacy whole-plan bounded apply
-make mailbox-reset          Delete only the private local cleanup state
+make bootstrap                Create the Python 3.14 development environment
+make doctor                   Check AWS login, resources and Lambda configuration
+make test                     Run tests and syntax checks
+make deploy-webhook           Perform the complete safe webhook update
+make setup-webhook            Recreate only the Microsoft Graph subscription
+make microsoft-login          Force a Microsoft browser login
+make status                   Show deployment status without secrets
+make logs-webhook             Follow webhook logs
+make upgrade-runtime          Upgrade both email Lambdas to Python 3.14
+make junk-backfill-audit      Audit a bounded Junk notification gap with live rules and Gemma
+make junk-backfill-report     Print the saved private gap plan and apply status
+make junk-backfill-apply      Delete only saved DELETE decisions still in Junk
+make junk-backfill-reset      Delete only private local Junk backfill state
+make mailbox-audit            Scan/resume Inbox and build a non-destructive report
+make mailbox-report           Print the latest local mailbox report
+make mailbox-review           Inspect unmatched senders and redacted subject patterns
+make mailbox-export           Build uploadable JSON, CSV and Excel analysis files
+make mailbox-prepare-apply    Create the private policy and rebuild the local plan
+make mailbox-plan             Preview a named stage or exact policy selection
+make mailbox-apply-stage      Move one bounded chunk from a reviewed stage
+make mailbox-apply-stage-all  Confirm once and continue checkpointed chunks
+make mailbox-apply            Legacy whole-plan bounded apply
+make mailbox-reset            Delete only the private local cleanup state
 ```
 
 See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubleshooting.
@@ -104,7 +105,8 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Historical cleanup exports contain aggregate sender data and redacted subject patterns, not raw message-level content.
 - Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
 - Named apply stages print exact pending counts before asking for confirmation.
-- Staged apply moves at most 5,000 messages per run and resumes from recorded outcomes.
+- Continuous staged apply checkpoints after each bounded chunk and stops on failures, no progress, or its total-run cap.
+- Graph move concurrency defaults to four workers and is bounded from one through eight.
 - The retention service defaults to audit mode.
 - Retention apply mode requires an explicit confirmation value.
 - The retention Graph client exposes moves to Deleted Items, not permanent deletion.
@@ -134,7 +136,7 @@ tests/                        unit tests
 
 ## Development
 
-Local development targets Python 3.14. CI currently runs on Python 3.11 and 3.14 while compatibility with existing deployments is maintained.
+Local development targets Python 3.14. CI is configured for Python 3.11 and 3.14; when the GitHub Actions allowance is unavailable, run the same repository checks locally.
 
 ```bash
 make bootstrap
