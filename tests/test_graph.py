@@ -1,12 +1,16 @@
 import unittest
+from collections import Counter
+from unittest.mock import patch
 
-from email_filter.graph import GraphClient
+from email_filter.graph import GraphClient, GraphRequestError
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, headers=None, text=""):
         self.payload = payload
         self.status_code = status_code
+        self.headers = headers or {}
+        self.text = text
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -38,6 +42,8 @@ class FakeParallelGraphClient(GraphClient):
         self.token_refresher = lambda: "refreshed"
         self.parallel_chunks = []
         self.failing_chunk_first_id = failing_chunk_first_id
+        self._request_diagnostics = Counter()
+        self.last_move_diagnostics = {}
 
     def _parallel_move_batch(
         self,
@@ -49,8 +55,8 @@ class FakeParallelGraphClient(GraphClient):
         chunk = list(message_ids)
         self.parallel_chunks.append(chunk)
         if chunk and chunk[0] == self.failing_chunk_first_id:
-            raise RuntimeError("simulated batch failure")
-        return {message_id: "moved" for message_id in chunk}
+            raise GraphRequestError(429, "simulated throttle")
+        return ({message_id: "moved" for message_id in chunk}, Counter())
 
 
 class GraphPageTests(unittest.TestCase):
@@ -103,7 +109,8 @@ class GraphPageTests(unittest.TestCase):
 
 
 class GraphBatchTests(unittest.TestCase):
-    def test_missing_subresponse_is_retried(self):
+    @patch("email_filter.graph.time.sleep", return_value=None)
+    def test_missing_subresponse_is_retried(self, _sleep):
         session = FakeSession(
             [
                 FakeResponse({"responses": [{"id": "0", "status": 201}]}),
@@ -118,6 +125,7 @@ class GraphBatchTests(unittest.TestCase):
         )
         self.assertEqual(result, {"moved": 2, "failed": 0})
         self.assertEqual(len(session.posts), 2)
+        self.assertEqual(client.last_move_diagnostics["missingSubresponses"], 1)
 
     def test_non_retryable_failure_is_counted(self):
         session = FakeSession(
@@ -129,6 +137,7 @@ class GraphBatchTests(unittest.TestCase):
             destination_folder_id="deleted",
         )
         self.assertEqual(result, {"moved": 0, "failed": 1})
+        self.assertEqual(client.last_move_diagnostics["subresponseHttp400"], 1)
 
     def test_detailed_moves_distinguish_missing_and_failed(self):
         session = FakeSession(
@@ -154,6 +163,57 @@ class GraphBatchTests(unittest.TestCase):
             {"moved": "moved", "missing": "missing", "failed": "failed"},
         )
 
+    @patch("email_filter.graph.time.sleep", return_value=None)
+    def test_top_level_429_is_retried_before_batch_is_failed(self, _sleep):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {"error": {"code": "TooManyRequests", "message": "slow down"}},
+                    status_code=429,
+                    headers={"Retry-After": "0"},
+                ),
+                FakeResponse({"responses": [{"id": "0", "status": 201}]}),
+            ]
+        )
+        client = GraphClient("token", session=session)
+        outcomes = client.move_messages_detailed(
+            ["message-a"],
+            destination_folder_id="deleted",
+            max_attempts=2,
+        )
+        self.assertEqual(outcomes, {"message-a": "moved"})
+        self.assertEqual(len(session.posts), 2)
+        self.assertEqual(client.last_move_diagnostics["topLevelHttp429"], 1)
+        self.assertEqual(client.last_move_diagnostics["topLevelRetries"], 1)
+
+    @patch("email_filter.graph.time.sleep", return_value=None)
+    def test_subresponse_429_uses_retry_path_and_is_reported(self, _sleep):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "responses": [
+                            {
+                                "id": "0",
+                                "status": 429,
+                                "headers": {"Retry-After": "0"},
+                            }
+                        ]
+                    }
+                ),
+                FakeResponse({"responses": [{"id": "0", "status": 201}]}),
+            ]
+        )
+        client = GraphClient("token", session=session)
+        outcomes = client.move_messages_detailed(
+            ["message-a"],
+            destination_folder_id="deleted",
+            max_attempts=2,
+        )
+        self.assertEqual(outcomes, {"message-a": "moved"})
+        self.assertEqual(client.last_move_diagnostics["subresponseHttp429"], 1)
+        self.assertEqual(client.last_move_diagnostics["retriedMessages"], 1)
+
     def test_parallel_workers_split_graph_batches_at_twenty(self):
         client = FakeParallelGraphClient()
         message_ids = [f"message-{index}" for index in range(45)]
@@ -169,7 +229,7 @@ class GraphBatchTests(unittest.TestCase):
         )
         self.assertTrue(all(outcome == "moved" for outcome in outcomes.values()))
 
-    def test_parallel_worker_failure_is_bounded_to_its_batch(self):
+    def test_parallel_worker_failure_is_bounded_and_diagnosed(self):
         client = FakeParallelGraphClient(failing_chunk_first_id="message-20")
         message_ids = [f"message-{index}" for index in range(45)]
         outcomes = client.move_messages_detailed(
@@ -187,6 +247,7 @@ class GraphBatchTests(unittest.TestCase):
             sorted(f"message-{index}" for index in range(20, 40)),
         )
         self.assertEqual(sum(outcome == "moved" for outcome in outcomes.values()), 25)
+        self.assertEqual(client.last_move_diagnostics["workerHttp429Messages"], 20)
 
 
 if __name__ == "__main__":

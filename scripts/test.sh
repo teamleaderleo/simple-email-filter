@@ -28,6 +28,7 @@ bash -n \
   scripts/email-filter.sh \
   scripts/lambda-deploy.sh \
   scripts/mailbox-cleanup.sh \
+  scripts/mailbox-apply-stage-all.sh \
   scripts/mailbox-export.sh \
   scripts/junk-backfill.sh \
   scripts/test.sh
