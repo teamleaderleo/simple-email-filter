@@ -1,6 +1,6 @@
 # Operations
 
-The repository now owns the deployment procedure. Routine updates should not require copying individual AWS, Docker or Microsoft Graph commands out of a chat.
+The repository owns the deployment procedure. Routine updates should not require copying individual AWS, Docker or Microsoft Graph commands out of a chat.
 
 ## Routine webhook update
 
@@ -22,7 +22,7 @@ make deploy-webhook
 6. runs the complete test suite and syntax checks
 7. downloads a rollback copy of the currently deployed webhook ZIP
 8. detects the live Lambda runtime and CPU architecture
-9. builds matching Linux dependencies in Docker
+9. reuses matching Linux dependencies from the local build cache, installing them only when the runtime, architecture or requirements change
 10. updates Lambda code without replacing environment variables
 11. checks the cached Microsoft token and opens browser authentication only when it has expired
 12. exercises the exact Microsoft Graph validation-token handshake against API Gateway
@@ -66,25 +66,43 @@ AWS_PROFILE=another-profile AWS_REGION=ca-central-1 make doctor
 make bootstrap        Create the Python 3.14 virtual environment and install tools
 make doctor           Validate local tools, AWS access and deployed resources
 make test             Run tests and syntax checks
-make deploy-webhook   Backup, build, deploy and recreate the Graph subscription
+make deploy-webhook   Cached build, backup, deploy and Graph subscription setup
 make setup-webhook    Refresh authentication when needed and recreate only the subscription
 make microsoft-login  Force a Microsoft browser login
 make status           Show deployment and subscription status without secrets
 make logs-webhook     Follow the webhook Lambda logs
-make upgrade-runtime  Explicitly upgrade the webhook Lambda to Python 3.14
+make upgrade-runtime  Upgrade both email Lambdas to Python 3.14
 ```
 
 ## Python versions
 
-Local development targets Python 3.14. CI runs the suite on both Python 3.11 and 3.14 while the deployed Lambda is being transitioned.
+Local development targets Python 3.14. CI runs the suite on both Python 3.11 and 3.14 while the deployed Lambdas are transitioned deliberately.
 
-The normal deployment command builds against the runtime currently configured on the Lambda, preventing a compiled-package mismatch. Runtime upgrades are deliberately separate:
+The normal deployment command builds against the runtime currently configured on the webhook Lambda, preventing a compiled-package mismatch. Runtime upgrades are deliberately separate:
 
 ```bash
 make upgrade-runtime
 ```
 
-That command creates a backup, asks for confirmation, builds a Python 3.14 package and updates the runtime without replacing Lambda environment variables.
+That command creates rollback backups, asks once for confirmation, builds matching Python 3.14 packages, upgrades both `email-webhook-handler` and `email-subscription-manager`, validates the endpoint and recreates the Graph subscription. Existing Lambda environment variables are not replaced.
+
+## Build cache
+
+Lambda dependencies are cached under:
+
+```text
+.build-cache/lambda/<runtime>-<architecture>-<requirements-hash>/
+```
+
+The first build for a runtime and CPU architecture pulls the Docker image and installs dependencies. Later deployments reuse that directory and only copy the handler source and create the ZIP. Changing `requirements-webhook.txt`, the runtime or the architecture creates a new cache entry automatically.
+
+Clear all cached build files when troubleshooting a dependency package:
+
+```bash
+rm -rf .build-cache
+```
+
+The next deployment will rebuild them.
 
 ## Microsoft authentication
 
@@ -114,7 +132,7 @@ make deploy-webhook
 List local backups:
 
 ```bash
-find backups -name 'email-webhook-handler.zip' -print
+find backups -name 'email-*.zip' -print
 ```
 
 Restore a selected package:
@@ -138,7 +156,7 @@ aws lambda wait function-updated \
 
 ## Security notes
 
-The deploy command uses code-only Lambda updates and does not send an `--environment` argument. This prevents the existing Microsoft and Cloudflare settings from being erased.
+The deploy commands use code-only Lambda updates and do not send an `--environment` argument. This prevents the existing Microsoft and Cloudflare settings from being erased.
 
 `make doctor` warns when the AWS profile is authenticated as the root user. Root access is not blocked so an existing personal deployment can be repaired, but routine work should move to a non-root administrator identity.
 

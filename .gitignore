@@ -9,6 +9,7 @@ test-event.json
 webhook-package/
 subscription-package/
 backups/
+.build-cache/
 
 # Node.js
 node_modules/
