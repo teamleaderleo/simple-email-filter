@@ -7,6 +7,7 @@ from typing import Any
 from .models import MatchRule, Policy, RetentionRule
 
 _VALID_MODES = {"forever", "days", "latest", "days_and_latest"}
+_VALID_GROUPS = {"policy", "sender"}
 
 
 def _normalise_strings(values: Any) -> tuple[str, ...]:
@@ -29,6 +30,12 @@ def _parse_policy(raw: dict[str, Any]) -> Policy:
 
     days = retention_raw.get("days")
     keep_latest = retention_raw.get("keepLatest")
+    group_by = retention_raw.get("groupBy", "policy")
+
+    if group_by not in _VALID_GROUPS:
+        raise ValueError(
+            f"Policy {policy_id!r} has invalid retention groupBy {group_by!r}"
+        )
 
     if mode in {"days", "days_and_latest"}:
         if not isinstance(days, int) or days <= 0:
@@ -44,6 +51,11 @@ def _parse_policy(raw: dict[str, Any]) -> Policy:
     elif keep_latest is not None:
         raise ValueError(
             f"Policy {policy_id!r} cannot set keepLatest for mode {mode!r}"
+        )
+
+    if group_by != "policy" and mode not in {"latest", "days_and_latest"}:
+        raise ValueError(
+            f"Policy {policy_id!r} can set groupBy only for rolling latest modes"
         )
 
     match_raw = raw.get("match") or {}
@@ -75,6 +87,7 @@ def _parse_policy(raw: dict[str, Any]) -> Policy:
             mode=mode,
             days=days,
             keep_latest=keep_latest,
+            group_by=group_by,
         ),
         on_expiry=on_expiry,
     )
