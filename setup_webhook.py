@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -26,6 +27,7 @@ TABLE_NAME = os.environ.get("TOKEN_TABLE_NAME", "email-filter-tokens")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
+WEBHOOK_FUNCTION = os.environ.get("WEBHOOK_FUNCTION", "email-webhook-handler")
 
 
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
@@ -34,6 +36,10 @@ table = dynamodb.Table(TABLE_NAME)
 
 
 class MicrosoftAuthenticationError(RuntimeError):
+    pass
+
+
+class NotificationEndpointError(RuntimeError):
     pass
 
 
@@ -138,6 +144,60 @@ def ensure_seen_email_ttl():
         )
 
 
+def validate_notification_endpoint(webhook_url, http_client=requests):
+    """Exercise the exact Graph validation handshake before creating a subscription."""
+    token = "email-filter-" + secrets.token_urlsafe(18)
+    try:
+        response = http_client.post(
+            webhook_url,
+            params={"validationToken": token},
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+            data="",
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise NotificationEndpointError(
+            f"Webhook validation probe could not reach the endpoint: {exc}"
+        ) from exc
+
+    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    body = response.text
+    if response.status_code != 200 or content_type != "text/plain" or body != token:
+        preview = body[:500].replace("\n", " ")
+        raise NotificationEndpointError(
+            "Webhook validation probe failed: "
+            f"HTTP {response.status_code}, content-type {content_type or 'missing'}, "
+            f"body {preview!r}"
+        )
+
+    print("Webhook validation handshake passed.")
+
+
+def print_recent_webhook_logs(minutes=10):
+    """Print recent Lambda logs when endpoint validation fails."""
+    print(f"\nRecent logs for {WEBHOOK_FUNCTION}:")
+    try:
+        logs = boto3.client("logs", region_name=AWS_REGION)
+        response = logs.filter_log_events(
+            logGroupName=f"/aws/lambda/{WEBHOOK_FUNCTION}",
+            startTime=int((time.time() - minutes * 60) * 1000),
+            limit=50,
+        )
+    except Exception as exc:
+        print(f"Could not read CloudWatch logs: {exc}")
+        return
+
+    events = response.get("events") or []
+    if not events:
+        print("No Lambda log events were found in the selected window.")
+        return
+
+    for event in events[-30:]:
+        message = str(event.get("message") or "").rstrip()
+        if message:
+            print(message)
+
+
 def delete_old_subscription(session, subscription_id):
     if not subscription_id:
         return
@@ -162,6 +222,8 @@ def create_subscription(webhook_url):
         raise ValueError("Webhook URL must start with https://")
 
     print(f"Creating subscription with webhook URL: {webhook_url}")
+    validate_notification_endpoint(webhook_url)
+
     previous_subscription_id = get_subscription_record().get("subscription_id")
     token = authenticate_microsoft()
 
@@ -260,6 +322,11 @@ def main():
 
     try:
         subscription_id = create_subscription(webhook_url)
+    except NotificationEndpointError as exc:
+        print(f"Setup failed: {exc}")
+        print_recent_webhook_logs()
+        print("\nRedeploy the handler with: make deploy-webhook")
+        return 1
     except Exception as exc:
         print(f"Setup failed: {exc}")
         return 1
