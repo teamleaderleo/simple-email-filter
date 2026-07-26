@@ -14,6 +14,13 @@ class MailboxCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["apply", "--limit", "5001", "--confirm", "x"])
 
+    def test_worker_count_is_bounded(self):
+        parser = mailbox_cleanup.parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["apply", "--workers", "0", "--confirm", "x"])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["apply", "--workers", "9", "--confirm", "x"])
+
     def test_audit_refuses_to_replace_plan_after_apply_started(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
