@@ -7,18 +7,19 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from email_filter.apply_stages import merge_policy_selection, stage_names
 from email_filter.auth import acquire_access_token
 from email_filter.graph import GraphClient
 from email_filter.historical import (
     APPLY_CONFIRMATION,
     RESET_CONFIRMATION,
     HistoricalMailboxStore,
-    apply_plan,
     build_audit,
     scan_folder,
 )
 from email_filter.policy import load_policies
 from email_filter.review import build_unmatched_review
+from email_filter.staged_apply import apply_plan_selection, plan_status
 
 load_dotenv()
 
@@ -55,6 +56,29 @@ def _print(payload: dict) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _policy_selection(args: argparse.Namespace) -> set[str] | None:
+    return merge_policy_selection(
+        stage=getattr(args, "stage", None),
+        policy_ids=getattr(args, "policy_id", None),
+    )
+
+
+def _add_selection_arguments(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--stage",
+        choices=stage_names(),
+        default=None,
+        help="Use a named reviewed apply stage.",
+    )
+    group.add_argument(
+        "--policy-id",
+        action="append",
+        default=None,
+        help="Limit the plan to this policy id. Repeat for multiple policies.",
+    )
+
+
 def audit(args: argparse.Namespace) -> int:
     store = HistoricalMailboxStore(args.state_dir)
     if store.apply_results_path.exists():
@@ -72,6 +96,29 @@ def audit(args: argparse.Namespace) -> int:
         max_pages=args.max_pages,
         restart=args.restart,
     )
+    policies = load_policies(args.policy)
+    summary = build_audit(
+        store,
+        policies,
+        policy_path=str(Path(args.policy)),
+        top_limit=args.top,
+    )
+    summary["checkpointScanned"] = int(checkpoint.get("scanned", 0))
+    store.write_summary(summary)
+    _print(summary)
+    return 0
+
+
+def replan(args: argparse.Namespace) -> int:
+    store = HistoricalMailboxStore(args.state_dir)
+    if store.apply_results_path.exists():
+        raise RuntimeError(
+            "Apply has already started for this state directory. The saved plan cannot "
+            "be replaced until mailbox-reset is run."
+        )
+    checkpoint = store.checkpoint() or {}
+    if not checkpoint.get("complete"):
+        raise RuntimeError("Replan requires a complete saved mailbox scan")
     policies = load_policies(args.policy)
     summary = build_audit(
         store,
@@ -110,15 +157,25 @@ def review(args: argparse.Namespace) -> int:
     return 0
 
 
+def plan(args: argparse.Namespace) -> int:
+    store = HistoricalMailboxStore(args.state_dir)
+    payload = plan_status(store, policy_ids=_policy_selection(args))
+    payload["stage"] = args.stage
+    _print(payload)
+    return 0
+
+
 def apply(args: argparse.Namespace) -> int:
     store = HistoricalMailboxStore(args.state_dir)
     client = GraphClient(acquire_access_token())
-    result = apply_plan(
+    result = apply_plan_selection(
         client,
         store,
         confirmation=args.confirm,
         limit=args.limit,
+        policy_ids=_policy_selection(args),
     )
+    result["stage"] = args.stage
     _print(result)
     return 0 if result["failed"] == 0 else 2
 
@@ -165,6 +222,14 @@ def parser() -> argparse.ArgumentParser:
     )
     audit_parser.set_defaults(handler=audit)
 
+    replan_parser = subparsers.add_parser(
+        "replan",
+        help="Rebuild the local plan from the saved complete snapshot without Graph.",
+    )
+    replan_parser.add_argument("--policy", default=_default_policy())
+    replan_parser.add_argument("--top", type=int, default=25)
+    replan_parser.set_defaults(handler=replan)
+
     report_parser = subparsers.add_parser(
         "report",
         help="Print the latest local audit summary without contacting Graph.",
@@ -189,9 +254,16 @@ def parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--samples", type=_positive_int, default=4)
     review_parser.set_defaults(handler=review)
 
+    plan_parser = subparsers.add_parser(
+        "plan",
+        help="Show exact pending and completed counts without contacting Graph.",
+    )
+    _add_selection_arguments(plan_parser)
+    plan_parser.set_defaults(handler=plan)
+
     apply_parser = subparsers.add_parser(
         "apply",
-        help="Move a bounded part of the reviewed plan to Deleted Items.",
+        help="Move a bounded part of a reviewed plan selection to Deleted Items.",
     )
     apply_parser.add_argument("--limit", type=_bounded_apply_limit, default=500)
     apply_parser.add_argument(
@@ -199,6 +271,7 @@ def parser() -> argparse.ArgumentParser:
         required=True,
         help=f"Must equal {APPLY_CONFIRMATION}.",
     )
+    _add_selection_arguments(apply_parser)
     apply_parser.set_defaults(handler=apply)
 
     reset_parser = subparsers.add_parser(
