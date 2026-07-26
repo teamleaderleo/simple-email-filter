@@ -6,7 +6,52 @@ A personal Outlook automation project with three related jobs:
 - **Historical Cleanup** audits a large existing folder, checkpoints every page, reports retention candidates, and can move reviewed policy stages to Deleted Items in resumable batches.
 - **Mailbox Retention** lets ordinary mail arrive normally, then identifies categories that may be moved to Deleted Items after an explicit retention period. Retention currently defaults to audit mode.
 
-## Routine operations
+## Normal mailbox commands
+
+Routine mailbox work uses three commands:
+
+```bash
+make mailbox-check
+make mailbox-analyze
+make mailbox-clean
+```
+
+`make mailbox-check` repairs the Python environment, verifies AWS and Microsoft authentication, and runs the repository checks once for each Git commit. Repeated commands on the same tested commit skip the duplicate test run.
+
+`make mailbox-analyze` starts or resumes a non-destructive Inbox audit when no complete snapshot exists, then refreshes the privacy-minimised JSON, CSV and Excel package under `.mailbox-cleanup/inbox/export/`. Once cleanup has started, it preserves the saved plan and adds aggregate apply-progress files instead of refusing to export.
+
+`make mailbox-clean` is the normal reviewed cleanup command. It:
+
+1. runs the cached health checks
+2. creates or resumes the complete local snapshot
+3. creates the ignored private policy only when apply has not started
+4. refreshes the analysis export
+5. prints the exact whole-plan status
+6. asks for one confirmation
+7. resumes the reviewed `bulk`, `newsletters` and `operations` stages
+8. adapts Graph concurrency and checkpoint size when Microsoft throttles requests
+9. refreshes the export on success, failure or interruption
+
+Successful and missing outcomes are checkpointed after every chunk. The command may restart a bounded pass automatically, but it stops on persistent failures, no progress, authentication failure or its configured pass limit. All moves go to Deleted Items; there is no permanent-delete operation.
+
+Optional private defaults can be placed in:
+
+```text
+.mailbox-cleanup/inbox/config.env
+```
+
+For example:
+
+```bash
+MAILBOX_CLEAN_STAGES=bulk,newsletters,operations
+MAILBOX_GRAPH_WORKERS=4
+MAILBOX_STAGE_RUN_LIMIT=50000
+MAILBOX_OPEN_EXPORT=1
+```
+
+The low-level audit, plan, stage and reset commands remain available for diagnosis and targeted work.
+
+## Deployment operations
 
 The repository owns its deployment procedure. After the initial AWS login, a normal webhook update is:
 
@@ -28,45 +73,32 @@ make junk-backfill-audit
 
 The audit deletes nothing and saves a private local plan. Review it with `make junk-backfill-report`, then apply only saved DELETE decisions with `make junk-backfill-apply`. See [Junk notification gap backfill](docs/JUNK_BACKFILL.md).
 
-For a large existing Inbox, start with the non-destructive historical audit:
+## Analysis package
 
-```bash
-make mailbox-audit
+The export directory contains:
+
+```text
+.mailbox-cleanup/inbox/export/
+├── mailbox-analysis.xlsx
+├── mailbox-summary.json
+├── sender-summary.csv
+├── policy-impact.csv
+├── unmatched-senders.csv
+├── subject-patterns.csv
+├── unmatched-review.json
+├── apply-progress.json
+├── apply-progress.csv
+├── manifest.json
+└── README.txt
 ```
 
-The audit scans or resumes the Inbox, writes private local checkpoints, and produces counts for protected, retained, eligible, and unmatched messages. It moves nothing. Review unmatched senders without another Microsoft request:
+The package contains aggregate sender addresses and redacted subject patterns, but no message IDs, bodies, previews, attachments or raw subjects. The apply-progress files contain aggregate counts only and include no senders or subjects.
 
-```bash
-make mailbox-review
-```
-
-Create a compact analysis package instead of pasting a large report into chat:
-
-```bash
-make mailbox-export
-```
-
-The export re-evaluates the saved snapshot against the current policy without contacting Microsoft. It writes aggregate JSON, flat CSV files and a multi-sheet Excel workbook under `.mailbox-cleanup/inbox/export/`. The uploadable files contain sender addresses and redacted subject patterns, but no message IDs, bodies, previews, attachments or raw subjects.
-
-After the policy review is complete, prepare the ignored private policy and preview the default staged cleanup:
-
-```bash
-make mailbox-prepare-apply
-```
-
-For one bounded chunk, run `make mailbox-apply-stage`. To confirm once and continue checkpointed chunks until the selected stage is complete or the 30,000-message run cap is reached:
-
-```bash
-make mailbox-apply-stage-all
-```
-
-The default uses four concurrent Graph batch workers. Named stages separate high-volume bulk mail, reviewed newsletters, and operational notifications. See [Historical mailbox cleanup](docs/MAILBOX_CLEANUP.md).
-
-Useful commands:
+Useful low-level commands:
 
 ```text
 make bootstrap                Create the Python 3.14 development environment
-make doctor                   Check AWS login, resources and Lambda configuration
+make doctor                   Check deployment prerequisites, including Docker and AWS resources
 make test                     Run tests and syntax checks
 make deploy-webhook           Perform the complete safe webhook update
 make setup-webhook            Recreate only the Microsoft Graph subscription
@@ -81,11 +113,11 @@ make junk-backfill-reset      Delete only private local Junk backfill state
 make mailbox-audit            Scan/resume Inbox and build a non-destructive report
 make mailbox-report           Print the latest local mailbox report
 make mailbox-review           Inspect unmatched senders and redacted subject patterns
-make mailbox-export           Build uploadable JSON, CSV and Excel analysis files
+make mailbox-export           Refresh analysis and aggregate apply-progress files
 make mailbox-prepare-apply    Create the private policy and rebuild the local plan
 make mailbox-plan             Preview a named stage or exact policy selection
 make mailbox-apply-stage      Move one bounded chunk from a reviewed stage
-make mailbox-apply-stage-all  Confirm once and continue checkpointed chunks
+make mailbox-apply-stage-all  Resume one stage with adaptive checkpointed chunks
 make mailbox-apply            Legacy whole-plan bounded apply
 make mailbox-reset            Delete only the private local cleanup state
 ```
@@ -103,13 +135,11 @@ See [Operations](docs/OPERATIONS.md) for deployment setup, rollback and troubles
 - Historical cleanup audit mode moves nothing and checkpoints after complete pages.
 - Historical cleanup review mode is local-only and redacts obvious subject identifiers.
 - Historical cleanup exports contain aggregate sender data and redacted subject patterns, not raw message-level content.
+- Progress exports contain aggregate stage and policy counts only.
 - Historical cleanup apply mode refuses incomplete scans and checked-in example policies.
-- Named apply stages print exact pending counts before asking for confirmation.
-- Continuous staged apply checkpoints after each bounded chunk and stops on failures, no progress, or its total-run cap.
-- Graph move concurrency defaults to four workers and is bounded from one through eight.
-- The retention service defaults to audit mode.
-- Retention apply mode requires an explicit confirmation value.
-- The retention Graph client exposes moves to Deleted Items, not permanent deletion.
+- One-command cleanup preserves an existing applied plan and never silently replans it.
+- Adaptive apply retries Graph 429 and transient failures, follows retry delays, reduces pressure when necessary and increases it again only after clean chunks.
+- Every apply path moves to Deleted Items rather than permanently deleting mail.
 - Deployment uses code-only Lambda updates so existing Microsoft and Cloudflare environment variables are preserved.
 - Message bodies and attachments are not stored for dashboard activity or cleanup reports.
 
@@ -122,11 +152,13 @@ policies/                     checked-in example policies; personal policies are
 scripts/email-filter.sh       local authentication and AWS operations
 scripts/lambda-deploy.sh      cached Lambda packaging and deployment
 scripts/junk-backfill.sh      bounded Junk notification gap audit/apply operations
-scripts/mailbox-cleanup.sh    resumable historical mailbox operations
+scripts/mailbox-cleanup.sh    low-level resumable historical mailbox operations
+scripts/mailbox-apply-stage-all.sh  adaptive single-stage runner
+scripts/mailbox-ops.sh        high-level check, analyze and clean commands
 scripts/mailbox-export.sh     uploadable mailbox analysis package
 junk_backfill.py              Junk gap audit/report/apply CLI
 mailbox_cleanup.py            historical audit/report/review/plan/apply CLI
-mailbox_export.py             local JSON/CSV/XLSX export CLI
+mailbox_export.py             local JSON/CSV/XLSX and progress export CLI
 webhook_handler.py            deployed Junk Guard webhook
 setup_webhook.py              secured Graph subscription setup
 setup_token_interactive.py    Microsoft browser authentication and cache refresh
@@ -156,4 +188,4 @@ The webhook package is built inside the official Python Docker image for the dep
 
 ## Current roadmap
 
-The Junk Guard webhook, bounded gap replay, historical audit, analysis export and staged apply workflow now cover both notification outages and the existing backlog. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
+The Junk Guard webhook, bounded gap replay, historical audit, progress-aware analysis export and adaptive staged apply workflow now cover notification outages and the existing backlog. Next work includes deploying audit-only scheduled retention, mailbox-wide observe-only ingestion for new mail, a privacy-minimised API, and a read-only email dashboard in `scrapbook`.
