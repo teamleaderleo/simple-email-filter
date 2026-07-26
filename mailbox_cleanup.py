@@ -45,6 +45,13 @@ def _bounded_apply_limit(value: str) -> int:
     return parsed
 
 
+def _bounded_workers(value: str) -> int:
+    parsed = int(value)
+    if not 1 <= parsed <= 8:
+        raise argparse.ArgumentTypeError("workers must be between 1 and 8")
+    return parsed
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
@@ -167,13 +174,14 @@ def plan(args: argparse.Namespace) -> int:
 
 def apply(args: argparse.Namespace) -> int:
     store = HistoricalMailboxStore(args.state_dir)
-    client = GraphClient(acquire_access_token())
+    client = GraphClient(acquire_access_token(force_refresh=True))
     result = apply_plan_selection(
         client,
         store,
         confirmation=args.confirm,
         limit=args.limit,
         policy_ids=_policy_selection(args),
+        workers=args.workers,
     )
     result["stage"] = args.stage
     _print(result)
@@ -266,6 +274,7 @@ def parser() -> argparse.ArgumentParser:
         help="Move a bounded part of a reviewed plan selection to Deleted Items.",
     )
     apply_parser.add_argument("--limit", type=_bounded_apply_limit, default=500)
+    apply_parser.add_argument("--workers", type=_bounded_workers, default=1)
     apply_parser.add_argument(
         "--confirm",
         required=True,
