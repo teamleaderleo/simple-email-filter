@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from email_filter.auth import acquire_access_token
 from email_filter.graph import GraphClient
 from email_filter.historical import (
@@ -16,6 +18,8 @@ from email_filter.historical import (
     scan_folder,
 )
 from email_filter.policy import load_policies
+
+load_dotenv()
 
 
 def _default_policy() -> str:
