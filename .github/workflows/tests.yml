@@ -30,7 +30,7 @@ jobs:
           python -m unittest discover -s tests -v 2>&1 | tee unit-tests.log
       - name: Upload failing test log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-tests-${{ matrix.python-version }}-failure
           path: unit-tests.log
