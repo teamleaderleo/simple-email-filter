@@ -88,27 +88,33 @@ def authenticate_microsoft():
     )
 
 
-def obvious_rule_delete(sender, subject, preview):
-    text = f"{sender}\n{subject}\n{preview}".lower()
+def obvious_rule_delete(sender, subject, preview, sender_name=""):
+    text = f"{sender}\n{sender_name}\n{subject}\n{preview}".lower()
     sender_l = (sender or "").lower()
+    sender_name_l = (sender_name or "").lower()
     subject_l = (subject or "").lower()
 
     if any(re.search(pattern, text, re.I) for pattern in OBVIOUS_DELETE_PATTERNS):
         return True
 
-    if sender_l.endswith(".onmicrosoft.com") and any(
-        word in subject_l
-        for word in [
-            "reward",
-            "bonus",
-            "spin",
-            "spins",
-            "casino",
-            "jackpot",
-            "payout",
-            "payment code",
-            "win big",
-        ]
+    onmicrosoft_bait = f"{sender_name_l}\n{subject_l}"
+    numeric_free_chance = re.search(r"\b\d{2,4}\s+free\s+chance\b", subject_l)
+    if sender_l.endswith(".onmicrosoft.com") and (
+        numeric_free_chance
+        or any(
+            word in onmicrosoft_bait
+            for word in [
+                "reward",
+                "bonus",
+                "spin",
+                "spins",
+                "casino",
+                "jackpot",
+                "payout",
+                "payment code",
+                "win big",
+            ]
+        )
     ):
         return True
 
@@ -159,6 +165,7 @@ def cloudflare_delete_decision(email):
         return False, "CF_ENV_MISSING"
 
     sender = email.get("sender", "")
+    sender_name = email.get("sender_name", "")
     subject = email.get("subject", "")
     preview = email.get("preview", "")
 
@@ -195,6 +202,7 @@ When unsure, keep.
 
 Email:
 FROM: {sender}
+FROM NAME: {sender_name}
 SUBJECT: {subject}
 PREVIEW: {preview[:500]}
 
@@ -239,10 +247,11 @@ End with Final answer: 1 or Final answer: 0."""
 
 def get_deletion_decision(email):
     sender = email.get("sender", "")
+    sender_name = email.get("sender_name", "")
     subject = email.get("subject", "")
     preview = email.get("preview", "")
 
-    if obvious_rule_delete(sender, subject, preview):
+    if obvious_rule_delete(sender, subject, preview, sender_name):
         return True, "RULE_DELETE"
 
     return cloudflare_delete_decision(email)
@@ -419,6 +428,9 @@ def process_webhook_notification(notification, session, junk_id):
         "sender": (message.get("from") or {})
         .get("emailAddress", {})
         .get("address", ""),
+        "sender_name": (message.get("from") or {})
+        .get("emailAddress", {})
+        .get("name", ""),
         "preview": message.get("bodyPreview", ""),
         "received": message.get("receivedDateTime", ""),
     }
