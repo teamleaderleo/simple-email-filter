@@ -1,0 +1,161 @@
+name: deploy-webhook
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - webhook_handler.py
+      - requirements-webhook.txt
+      - .github/workflows/deploy-webhook.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-webhook
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  WEBHOOK_FUNCTION: email-webhook-handler
+
+jobs:
+  configuration-needed:
+    if: ${{ vars.AWS_DEPLOY_ROLE_ARN == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain one-time setup
+        run: |
+          echo '::notice::Automatic deployment is ready, but AWS_DEPLOY_ROLE_ARN is not configured.'
+          echo 'Create a least-privilege AWS IAM role trusted by GitHub OIDC for this repository main branch,'
+          echo 'then save its ARN as the repository Actions variable AWS_DEPLOY_ROLE_ARN.'
+
+  deploy:
+    if: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact tested source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -v
+          python -m compileall -q email_filter handlers webhook_handler.py junk_backfill.py setup_webhook.py setup_token_interactive.py
+          bash -n scripts/email-filter.sh scripts/lambda-deploy.sh scripts/junk-backfill.sh scripts/test.sh
+
+      - name: Obtain short-lived AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: simple-email-filter-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS identity and Lambda configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity
+          aws lambda get-function-configuration \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query '{Runtime:Runtime,Architecture:Architectures[0],State:State,LastUpdateStatus:LastUpdateStatus}'
+
+      - name: Back up currently deployed Lambda code
+        shell: bash
+        run: |
+          set -euo pipefail
+          location="$(aws lambda get-function \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query 'Code.Location' \
+            --output text)"
+          curl -fLsS "$location" -o previous-webhook-lambda.zip
+
+      - name: Build Lambda package for deployed runtime and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          runtime="$(aws lambda get-function-configuration \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query Runtime \
+            --output text)"
+          architecture="$(aws lambda get-function-configuration \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query 'Architectures[0]' \
+            --output text)"
+
+          case "$runtime" in
+            python3.11|python3.12|python3.13|python3.14) ;;
+            *) echo "Unsupported Lambda runtime: $runtime" >&2; exit 1 ;;
+          esac
+
+          case "$architecture" in
+            x86_64) platform='linux/amd64' ;;
+            arm64) platform='linux/arm64' ;;
+            *) echo "Unsupported Lambda architecture: $architecture" >&2; exit 1 ;;
+          esac
+
+          python_version="${runtime#python}"
+          rm -rf webhook-package webhook-lambda.zip
+          mkdir -p webhook-package
+
+          docker run --rm \
+            --platform "$platform" \
+            -v "$GITHUB_WORKSPACE":/var/task:ro \
+            -v "$GITHUB_WORKSPACE/webhook-package":/asset-output \
+            "python:${python_version}-slim" \
+            sh -lc 'python -m pip install --disable-pip-version-check --root-user-action=ignore --no-compile --quiet -r /var/task/requirements-webhook.txt -t /asset-output'
+
+          cp webhook_handler.py webhook-package/lambda_function.py
+          (cd webhook-package && zip -qr ../webhook-lambda.zip .)
+          test -s webhook-lambda.zip
+          unzip -l webhook-lambda.zip | grep -q 'lambda_function.py'
+
+      - name: Deploy code without changing Lambda environment or Graph subscription
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws lambda update-function-code \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --zip-file fileb://webhook-lambda.zip \
+            >/dev/null
+          aws lambda wait function-updated --function-name "$WEBHOOK_FUNCTION"
+
+      - name: Verify deployment completed
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(aws lambda get-function-configuration \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query LastUpdateStatus \
+            --output text)"
+          state="$(aws lambda get-function-configuration \
+            --function-name "$WEBHOOK_FUNCTION" \
+            --query State \
+            --output text)"
+          test "$status" = Successful
+          test "$state" = Active
+          echo "Deployed ${GITHUB_SHA} to ${WEBHOOK_FUNCTION}."
+
+      - name: Keep previous deployment as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: previous-webhook-lambda-${{ github.run_id }}
+          path: previous-webhook-lambda.zip
+          if-no-files-found: ignore
+          retention-days: 7
