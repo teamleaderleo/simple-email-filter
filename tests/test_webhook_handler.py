@@ -146,6 +146,23 @@ class WebhookSecurityTests(unittest.TestCase):
         authenticate_microsoft.assert_not_called()
 
 
+class ObviousRuleTests(unittest.TestCase):
+    @patch.object(webhook_handler, "cloudflare_delete_decision")
+    def test_golden_tiger_free_chance_is_deleted_before_gemma(self, cloudflare):
+        email = {
+            "sender": "peyton.flores@aqwsicechamps2504.onmicrosoft.com",
+            "sender_name": "Golden Tiger Rewards",
+            "subject": "150 free Chance!",
+            "preview": "gypnx64mcRvaRhRafuTUWJJiEo8NI9WE8NMhqnNJHD2RgDUw",
+        }
+
+        self.assertEqual(
+            webhook_handler.get_deletion_decision(email),
+            (True, "RULE_DELETE"),
+        )
+        cloudflare.assert_not_called()
+
+
 class ExactMessageProcessingTests(unittest.TestCase):
     @patch.object(webhook_handler, "mark_processed")
     @patch.object(webhook_handler, "get_deletion_decision")
@@ -163,7 +180,12 @@ class ExactMessageProcessingTests(unittest.TestCase):
             "id": "message-42",
             "parentFolderId": "junk-id",
             "subject": "Legitimate newsletter",
-            "from": {"emailAddress": {"address": "news@example.com"}},
+            "from": {
+                "emailAddress": {
+                    "address": "news@example.com",
+                    "name": "Example Newsletter",
+                }
+            },
             "bodyPreview": "Hello",
             "receivedDateTime": "2026-07-26T00:00:00Z",
         }
@@ -178,6 +200,8 @@ class ExactMessageProcessingTests(unittest.TestCase):
         self.assertEqual(result, {"processed": 1, "deleted": 0, "failed": 0})
         get_message.assert_called_once_with(session, "message-42")
         get_deletion_decision.assert_called_once()
+        classified = get_deletion_decision.call_args.args[0]
+        self.assertEqual(classified["sender_name"], "Example Newsletter")
         mark_processed.assert_called_once_with("message-42", "kept")
 
     @patch.object(webhook_handler, "mark_processed")
