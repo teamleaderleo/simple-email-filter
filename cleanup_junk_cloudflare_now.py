@@ -131,27 +131,33 @@ def fetch_latest_junk(session, junk_id, count):
     return messages[:count]
 
 
-def obvious_rule_delete(sender, subject, preview):
-    text = f"{sender}\n{subject}\n{preview}".lower()
+def obvious_rule_delete(sender, subject, preview, sender_name=""):
+    text = f"{sender}\n{sender_name}\n{subject}\n{preview}".lower()
     sender_l = (sender or "").lower()
+    sender_name_l = (sender_name or "").lower()
     subject_l = (subject or "").lower()
 
     if any(re.search(pattern, text, re.I) for pattern in OBVIOUS_DELETE_PATTERNS):
         return True
 
-    if sender_l.endswith(".onmicrosoft.com") and any(
-        word in subject_l
-        for word in [
-            "reward",
-            "bonus",
-            "spin",
-            "spins",
-            "casino",
-            "jackpot",
-            "payout",
-            "payment code",
-            "win big",
-        ]
+    onmicrosoft_bait = f"{sender_name_l}\n{subject_l}"
+    numeric_free_chance = re.search(r"\b\d{2,4}\s+free\s+chance\b", subject_l)
+    if sender_l.endswith(".onmicrosoft.com") and (
+        numeric_free_chance
+        or any(
+            word in onmicrosoft_bait
+            for word in [
+                "reward",
+                "bonus",
+                "spin",
+                "spins",
+                "casino",
+                "jackpot",
+                "payout",
+                "payment code",
+                "win big",
+            ]
+        )
     ):
         return True
 
@@ -194,7 +200,7 @@ def parse_decision(text):
     return None
 
 
-def cloudflare_delete_decision(sender, subject, preview):
+def cloudflare_delete_decision(sender, subject, preview, sender_name=""):
     url = (
         f"https://api.cloudflare.com/client/v4/accounts/"
         f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_MODEL}"
@@ -228,6 +234,7 @@ When unsure, keep.
 
 Email:
 FROM: {sender}
+FROM NAME: {sender_name}
 SUBJECT: {subject}
 PREVIEW: {preview[:500]}
 
@@ -304,20 +311,29 @@ def main():
             .get("emailAddress", {})
             .get("address", "")
         )
+        sender_name = (
+            (m.get("from") or {})
+            .get("emailAddress", {})
+            .get("name", "")
+        )
         subject = m.get("subject", "")
         preview = m.get("bodyPreview", "")
         received = m.get("receivedDateTime", "")
 
-        if not args.ai_all and obvious_rule_delete(sender, subject, preview):
+        if not args.ai_all and obvious_rule_delete(
+            sender, subject, preview, sender_name
+        ):
             should_delete = True
             raw = "RULE_DELETE"
         else:
-            should_delete, raw = cloudflare_delete_decision(sender, subject, preview)
+            should_delete, raw = cloudflare_delete_decision(
+                sender, subject, preview, sender_name
+            )
 
         print("=" * 80)
         print(f"{i}/{len(messages)}")
         print(f"Received: {received}")
-        print(f"From: {sender}")
+        print(f"From: {sender_name} <{sender}>" if sender_name else f"From: {sender}")
         print(f"Subject: {subject}")
         print(f"Decision: {raw!r}")
 
