@@ -59,7 +59,7 @@ jobs:
           bash -n scripts/email-filter.sh scripts/lambda-deploy.sh scripts/junk-backfill.sh scripts/test.sh
 
       - name: Obtain short-lived AWS credentials with GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: simple-email-filter-${{ github.run_id }}
