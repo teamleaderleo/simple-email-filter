@@ -16,6 +16,11 @@ CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_MODEL = os.environ.get("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4b-it")
 
+# Legitimate authentication and security notices can land in Junk. Preserve
+# mail from the services Leo uses for sign-in even when the classifier sees
+# security-related language in the subject or preview.
+PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai")
+
 TABLE_NAME = os.environ.get("TOKEN_TABLE_NAME", "email-filter-tokens")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
@@ -121,6 +126,19 @@ def obvious_rule_delete(sender, subject, preview, sender_name=""):
     return False
 
 
+def protected_sender(sender):
+    """Return whether the sender belongs to a trusted auth-service domain."""
+    address = (sender or "").strip().lower().rstrip(".")
+    if "@" not in address:
+        return False
+
+    domain = address.rsplit("@", 1)[1]
+    return any(
+        domain == protected_domain or domain.endswith(f".{protected_domain}")
+        for protected_domain in PROTECTED_SENDER_DOMAINS
+    )
+
+
 def extract_model_text(data):
     try:
         message = data["result"]["choices"][0]["message"]
@@ -186,7 +204,7 @@ def cloudflare_delete_decision(email):
 - fake giveaways
 - malware/fraud
 - fake payout, reward, jackpot, or payment hooks
-- deceptive account/security/storage alerts
+- clearly fake or deceptive account/security/storage alerts
 - clearly fake senders
 - fake reply-chain bait: messages pretending to be part of an existing conversation
 
@@ -195,10 +213,12 @@ Keep:
 - marketing from real games, ecommerce shops, creators, local businesses, or known brands
 - job/recruiter mail
 - service notices
+- legitimate sign-in, verification, password-reset, and security notices from recognized services
+- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com or claude.ai
 - financial updates
 - Microsoft Rewards promos when the sender matches Microsoft
 
-When unsure, keep.
+Being in the Junk folder is not evidence by itself. When unsure, keep.
 
 Email:
 FROM: {sender}
@@ -250,6 +270,9 @@ def get_deletion_decision(email):
     sender_name = email.get("sender_name", "")
     subject = email.get("subject", "")
     preview = email.get("preview", "")
+
+    if protected_sender(sender):
+        return False, "PROTECTED_SENDER"
 
     if obvious_rule_delete(sender, subject, preview, sender_name):
         return True, "RULE_DELETE"

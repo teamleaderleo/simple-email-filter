@@ -14,6 +14,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_MODEL = os.getenv("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4b-it")
+PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai")
 
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
@@ -164,6 +165,18 @@ def obvious_rule_delete(sender, subject, preview, sender_name=""):
     return False
 
 
+def protected_sender(sender):
+    address = (sender or "").strip().lower().rstrip(".")
+    if "@" not in address:
+        return False
+
+    domain = address.rsplit("@", 1)[1]
+    return any(
+        domain == protected_domain or domain.endswith(f".{protected_domain}")
+        for protected_domain in PROTECTED_SENDER_DOMAINS
+    )
+
+
 def extract_model_text(data):
     try:
         message = data["result"]["choices"][0]["message"]
@@ -218,7 +231,7 @@ def cloudflare_delete_decision(sender, subject, preview, sender_name=""):
 - fake giveaways
 - malware/fraud
 - fake payout, reward, jackpot, or payment hooks
-- deceptive account/security/storage alerts
+- clearly fake or deceptive account/security/storage alerts
 - clearly fake senders
 - fake reply-chain bait: messages pretending to be part of an existing conversation
 
@@ -227,10 +240,12 @@ Keep:
 - marketing from real games, ecommerce shops, creators, local businesses, or known brands
 - job/recruiter mail
 - service notices
+- legitimate sign-in, verification, password-reset, and security notices from recognized services
+- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com or claude.ai
 - financial updates
 - Microsoft Rewards promos when the sender matches Microsoft
 
-When unsure, keep.
+Being in the Junk folder is not evidence by itself. When unsure, keep.
 
 Email:
 FROM: {sender}
@@ -320,7 +335,10 @@ def main():
         preview = m.get("bodyPreview", "")
         received = m.get("receivedDateTime", "")
 
-        if not args.ai_all and obvious_rule_delete(
+        if protected_sender(sender):
+            should_delete = False
+            raw = "PROTECTED_SENDER"
+        elif not args.ai_all and obvious_rule_delete(
             sender, subject, preview, sender_name
         ):
             should_delete = True
