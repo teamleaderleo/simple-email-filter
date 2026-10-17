@@ -163,6 +163,28 @@ class ObviousRuleTests(unittest.TestCase):
         cloudflare.assert_not_called()
 
 
+class ProtectedSenderTests(unittest.TestCase):
+    @patch.object(webhook_handler, "cloudflare_delete_decision")
+    def test_anthropic_sign_in_mail_is_kept_before_gemma(self, cloudflare):
+        email = {
+            "sender": "noreply@mail.anthropic.com",
+            "sender_name": "Anthropic",
+            "subject": "Your Anthropic sign-in code",
+            "preview": "Use this code to sign in to Claude.",
+        }
+
+        self.assertEqual(
+            webhook_handler.get_deletion_decision(email),
+            (False, "PROTECTED_SENDER"),
+        )
+        cloudflare.assert_not_called()
+
+    def test_protected_sender_requires_a_real_domain_suffix(self):
+        self.assertTrue(webhook_handler.protected_sender("noreply@anthropic.com"))
+        self.assertTrue(webhook_handler.protected_sender("noreply@mail.claude.ai"))
+        self.assertFalse(webhook_handler.protected_sender("noreply@notanthropic.com"))
+
+
 class ExactMessageProcessingTests(unittest.TestCase):
     @patch.object(webhook_handler, "mark_processed")
     @patch.object(webhook_handler, "get_deletion_decision")
