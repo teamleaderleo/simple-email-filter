@@ -184,6 +184,28 @@ class ProtectedSenderTests(unittest.TestCase):
         self.assertTrue(webhook_handler.protected_sender("noreply@mail.claude.ai"))
         self.assertTrue(webhook_handler.protected_sender("no-reply@email.claude.com"))
         self.assertFalse(webhook_handler.protected_sender("noreply@claude.com.evil.io"))
+
+    def test_icloud_hide_my_email_relay_keeps_the_original_domain(self):
+        relayed = (
+            "no-reply-21YiEBbXlJDU5ZY-GBiOyQ_at_mail_anthropic_com_hhfb2w28hz1bws_6fdh5549@icloud.com",
+            "invoice+statements_at_mail_anthropic_com_hhb42w99hzbcws_61dh5549@icloud.com",
+            "no-reply_at_email_claude_com_hh5a2w84hz1aws_a6dh5549@icloud.com",
+        )
+        for sender in relayed:
+            with self.subTest(sender=sender):
+                self.assertTrue(webhook_handler.protected_sender(sender))
+
+        self.assertFalse(
+            webhook_handler.protected_sender(
+                "promo_at_notanthropic_com_hhfb2w28hz1bws_6fdh5549@icloud.com"
+            )
+        )
+        self.assertFalse(
+            webhook_handler.protected_sender(
+                "promo_at_anthropic_com_evil_io_hhfb2w28hz1bws_6fdh5549@icloud.com"
+            )
+        )
+        self.assertFalse(webhook_handler.protected_sender("someone@icloud.com"))
         self.assertFalse(webhook_handler.protected_sender("noreply@notanthropic.com"))
 
 
