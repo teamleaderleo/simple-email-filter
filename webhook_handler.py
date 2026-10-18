@@ -21,6 +21,11 @@ CLOUDFLARE_MODEL = os.environ.get("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4
 # security-related language in the subject or preview.
 PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai", "claude.com")
 
+# iCloud Hide My Email rewrites the From address to
+# <local>_at_<domain with dots as underscores>_<token>_<token>@icloud.com.
+ICLOUD_RELAY_DOMAINS = ("icloud.com", "privaterelay.appleid.com")
+ICLOUD_RELAY_SENDER = re.compile(r"_at_([a-z0-9-]+(?:_[a-z0-9-]+)+)_[a-z0-9]+_[a-z0-9]+$")
+
 TABLE_NAME = os.environ.get("TOKEN_TABLE_NAME", "email-filter-tokens")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
@@ -133,6 +138,11 @@ def protected_sender(sender):
         return False
 
     domain = address.rsplit("@", 1)[1]
+    if domain in ICLOUD_RELAY_DOMAINS:
+        relayed = ICLOUD_RELAY_SENDER.search(address.rsplit("@", 1)[0])
+        if relayed:
+            domain = relayed.group(1).replace("_", ".")
+
     return any(
         domain == protected_domain or domain.endswith(f".{protected_domain}")
         for protected_domain in PROTECTED_SENDER_DOMAINS
