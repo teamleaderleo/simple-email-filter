@@ -14,7 +14,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN")
 CLOUDFLARE_MODEL = os.getenv("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4b-it")
-PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai")
+PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai", "claude.com")
 
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["User.Read", "Mail.ReadWrite"]
@@ -241,7 +241,7 @@ Keep:
 - job/recruiter mail
 - service notices
 - legitimate sign-in, verification, password-reset, and security notices from recognized services
-- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com or claude.ai
+- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com, claude.ai, or claude.com
 - financial updates
 - Microsoft Rewards promos when the sender matches Microsoft
 

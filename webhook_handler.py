@@ -19,7 +19,7 @@ CLOUDFLARE_MODEL = os.environ.get("CLOUDFLARE_MODEL", "@cf/google/gemma-4-26b-a4
 # Legitimate authentication and security notices can land in Junk. Preserve
 # mail from the services Leo uses for sign-in even when the classifier sees
 # security-related language in the subject or preview.
-PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai")
+PROTECTED_SENDER_DOMAINS = ("anthropic.com", "claude.ai", "claude.com")
 
 TABLE_NAME = os.environ.get("TOKEN_TABLE_NAME", "email-filter-tokens")
 AUTHORITY = "https://login.microsoftonline.com/consumers"
@@ -214,7 +214,7 @@ Keep:
 - job/recruiter mail
 - service notices
 - legitimate sign-in, verification, password-reset, and security notices from recognized services
-- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com or claude.ai
+- Anthropic or Claude sign-in and account emails when the sender is from anthropic.com, claude.ai, or claude.com
 - financial updates
 - Microsoft Rewards promos when the sender matches Microsoft
 
