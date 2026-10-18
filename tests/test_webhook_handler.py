@@ -182,6 +182,8 @@ class ProtectedSenderTests(unittest.TestCase):
     def test_protected_sender_requires_a_real_domain_suffix(self):
         self.assertTrue(webhook_handler.protected_sender("noreply@anthropic.com"))
         self.assertTrue(webhook_handler.protected_sender("noreply@mail.claude.ai"))
+        self.assertTrue(webhook_handler.protected_sender("no-reply@email.claude.com"))
+        self.assertFalse(webhook_handler.protected_sender("noreply@claude.com.evil.io"))
         self.assertFalse(webhook_handler.protected_sender("noreply@notanthropic.com"))
 
 
